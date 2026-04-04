@@ -6,27 +6,31 @@
 
 LogWindow::LogWindow(QWidget *parent) : QDialog(parent) {
     setWindowTitle("ModemBridge Fleet Diagnostics");
-    resize(800, 600); // Nice and wide for hex dumps
+    resize(800, 600);
 
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
     // --- The Terminal Output ---
     m_textEdit = new QTextEdit(this);
     m_textEdit->setReadOnly(true);
-    // Use a monospace font so the hex columns line up perfectly
     m_textEdit->setFontFamily("Courier");
-    // Dark mode styling for that proper hacker terminal feel
     m_textEdit->setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; font-size: 10pt;");
 
     // --- The Controls ---
     QHBoxLayout *bottomLayout = new QHBoxLayout();
+
     m_chkAutoScroll = new QCheckBox("Auto-Scroll", this);
-    m_chkAutoScroll->setChecked(true); // Default to keeping up with traffic
+    m_chkAutoScroll->setChecked(true);
+
+    m_chkHexMode = new QCheckBox("Hex Dump Mode", this);
+    m_chkHexMode->setChecked(true);
+    connect(m_chkHexMode, &QCheckBox::toggled, this, &LogWindow::refreshView);
 
     m_btnClear = new QPushButton("Clear Display", this);
     connect(m_btnClear, &QPushButton::clicked, this, &LogWindow::clearLogs);
 
     bottomLayout->addWidget(m_chkAutoScroll);
+    bottomLayout->addWidget(m_chkHexMode);
     bottomLayout->addStretch();
     bottomLayout->addWidget(m_btnClear);
 
@@ -35,6 +39,7 @@ LogWindow::LogWindow(QWidget *parent) : QDialog(parent) {
 }
 
 void LogWindow::clearLogs() {
+    m_history.clear();
     m_textEdit->clear();
 }
 
@@ -43,110 +48,138 @@ QString LogWindow::getTimestamp() const {
 }
 
 void LogWindow::appendHtml(const QString &html) {
-    m_textEdit->append(html);
+    if (html.isEmpty()) return; // Don't append blank lines for filtered data
 
-    // Force the scrollbar to the bottom if Auto-Scroll is on
+    m_textEdit->append(html);
     if (m_chkAutoScroll->isChecked()) {
         QScrollBar *sb = m_textEdit->verticalScrollBar();
         sb->setValue(sb->maximum());
     }
 }
 
-// --- Signal Catchers ---
+// --- Re-Render Logic ---
 
-void LogWindow::logStatus(const QString &portName, const QString &msg) {
-    // Neon Green for standard status messages
-    QString html = QString("<span style='color: #4CAF50;'>[%1] [%2] %3</span>")
-                       .arg(getTimestamp()).arg(portName).arg(msg.toHtmlEscaped());
-    appendHtml(html);
+void LogWindow::refreshView() {
+    m_textEdit->setUpdatesEnabled(false);
+    m_textEdit->clear();
+
+    for (const LogEntry &entry : m_history) {
+        QString html = buildHtmlForEntry(entry);
+        if (!html.isEmpty()) {
+            m_textEdit->append(html);
+        }
+    }
+
+    if (m_chkAutoScroll->isChecked()) {
+        QScrollBar *sb = m_textEdit->verticalScrollBar();
+        sb->setValue(sb->maximum());
+    }
+    m_textEdit->setUpdatesEnabled(true);
 }
 
-void LogWindow::logError(const QString &portName, const QString &err) {
-    // Angry Red for errors
-    QString html = QString("<span style='color: #F44336;'>[%1] [%2] ERROR: %3</span>")
-                       .arg(getTimestamp()).arg(portName).arg(err.toHtmlEscaped());
-    appendHtml(html);
-}
-\
+QString LogWindow::buildHtmlForEntry(const LogEntry &entry) {
+    if (entry.type == LogEntry::Status) {
+        return QString("<span style='color: #4CAF50;'>[%1] [%2] %3</span>")
+        .arg(entry.timestamp).arg(entry.portName).arg(entry.msgOrDir.toHtmlEscaped());
+    }
 
+    if (entry.type == LogEntry::Error) {
+        return QString("<span style='color: #F44336;'>[%1] [%2] ERROR: %3</span>")
+        .arg(entry.timestamp).arg(entry.portName).arg(entry.msgOrDir.toHtmlEscaped());
+    }
 
-void LogWindow::logTrace(const QString &portName, const QString &dir, const QByteArray &data) {
-    // 1. Determine Colors and Headers
-    // Using your specific Hex colors: Orange for TX, Blue for RX
-    QString headerColor = dir.startsWith("TX") ? "#C45911" : "#1177C4";
+    // --- THE BULLETPROOF FILTER ---
+    // Since ModemBridge sends "CMD" when disconnected, and "TCP"/"SSH"/"MACRO"
+    // when connected, we just drop anything that isn't a CMD if Hex Mode is off.
+    if (!m_chkHexMode->isChecked() && !entry.msgOrDir.contains("CMD")) {
+        return QString(); // Returns empty, so it appends absolutely nothing.
+    }
 
-    // We'll leave latencyHeader empty for now, or you can calculate it later
-    QString latencyHeader = "";
+    QString headerColor = entry.msgOrDir.startsWith("TX") ? "#C45911" : "#1177C4";
+    QString dump = QString("<div style='margin-top: 5px; border-left: 3px solid %1; padding-left: 5px;'>"
+                           "<pre style='margin: 0; line-height: 1.2; font-family: \"Courier New\", Courier, monospace; color: #d4d4d4;'>"
+                           "<font color='#888888'>[%2]</font> <font color='%3'><b>[PORT: %4 %5]</b></font> %6 bytes:\n")
+                       .arg(headerColor).arg(entry.timestamp).arg(headerColor)
+                       .arg(entry.portName).arg(entry.msgOrDir).arg(entry.data.size());
 
-    // 2. Build the Header
-    QString dump = QString("<div style='margin-top: 5px; border-left: 3px solid %1; padding-left: 5px;'>")
-                       .arg(headerColor);
+    if (m_chkHexMode->isChecked()) {
+        // FULL HEX DUMP
+        for (int i = 0; i < entry.data.size(); i += 16) {
+            QByteArray chunk = entry.data.mid(i, 16);
+            QString offset = QString("%1").arg(i, 4, 16, QChar('0')).toUpper();
 
-    dump += QString("<pre style='margin: 0; line-height: 1.2; font-family: \"Courier New\", Courier, monospace; color: #d4d4d4;'>")
-            + QString("<font color='#888888'>[%1]</font> <font color='%2'><b>[PORT: %3 %4]</b></font> %5 bytes%6:\n")
-                  .arg(getTimestamp())
-                  .arg(headerColor)
-                  .arg(portName)
-                  .arg(dir)
-                  .arg(data.size())
-                  .arg(latencyHeader);
-
-    // 3. The 16-byte Hex Grid Loop
-    for (int i = 0; i < data.size(); i += 16) {
-        QByteArray chunk = data.mid(i, 16);
-        QString offset = QString("%1").arg(i, 4, 16, QChar('0')).toUpper();
-
-        // --- Build Hex Part ---
-        QString hex;
-        for (int j = 0; j < 16; ++j) {
-            if (j == 8) hex += " "; // Middle Gutter for readability
-
-            if (j < chunk.size()) {
-                quint8 byte = static_cast<quint8>(chunk[j]);
-                QString bHex = QString("%1").arg(byte, 2, 16, QChar('0')).toUpper();
-
-                // Dimmable Bytes: Darker gray for 0x00 and 0x20 (Space)
-                if (byte == 0x00 || byte == 0x20) {
-                    hex += QString("<font color='#444444'>%1</font> ").arg(bHex);
+            QString hex;
+            for (int j = 0; j < 16; ++j) {
+                if (j == 8) hex += " ";
+                if (j < chunk.size()) {
+                    quint8 byte = static_cast<quint8>(chunk[j]);
+                    QString bHex = QString("%1").arg(byte, 2, 16, QChar('0')).toUpper();
+                    if (byte == 0x00 || byte == 0x20) {
+                        hex += QString("<font color='#444444'>%1</font> ").arg(bHex);
+                    } else {
+                        hex += bHex + " ";
+                    }
                 } else {
-                    hex += bHex + " ";
+                    hex += "&nbsp;&nbsp; ";
                 }
-            } else {
-                hex += "&nbsp;&nbsp; "; // Alignment padding for short lines
             }
-        }
 
-        // --- Build Atari-Aware ASCII Part ---
+            QString ascii;
+            for (int k = 0; k < chunk.size(); ++k) {
+                quint8 byte = static_cast<quint8>(chunk[k]);
+                if (byte >= 32 && byte <= 126) ascii += QString(QChar(byte)).toHtmlEscaped();
+                else if (byte >= 160 && byte <= 254) ascii += QString(QChar(byte - 128)).toHtmlEscaped();
+                else ascii += "<font color='#444444'>.</font>";
+            }
+            dump += QString("<font color='#888888'>%1:</font>  %2  <font color='#888888'>|</font>  %3\n").arg(offset).arg(hex).arg(ascii);
+        }
+    } else {
+        // PLAIN TEXT MODE (Only CMD traces survive the filter at the top to reach here)
         QString ascii;
-        for (int k = 0; k < chunk.size(); ++k) {
-            quint8 byte = static_cast<quint8>(chunk[k]);
-
-            // Standard ASCII
-            if (byte >= 32 && byte <= 126) {
-                ascii += QString(QChar(byte)).toHtmlEscaped(); // Wrap it in QString!
-            }
-            // Atari High-Bit Translation (Inverse/Graphic characters)
-            else if (byte >= 160 && byte <= 254) {
-                ascii += QString(QChar(byte - 128)).toHtmlEscaped(); // Wrap it here too!
-            }
-            else {
-                ascii += "<font color='#444444'>.</font>"; // Dimmable dot
-            }
+        for (int k = 0; k < entry.data.size(); ++k) {
+            quint8 byte = static_cast<quint8>(entry.data[k]);
+            if (byte == '\r' || byte == '\n' || byte == '\t') ascii += QChar(byte);
+            else if (byte >= 32 && byte <= 126) ascii += QString(QChar(byte)).toHtmlEscaped();
+            else if (byte >= 160 && byte <= 254) ascii += QString(QChar(byte - 128)).toHtmlEscaped();
+            else ascii += "<font color='#444444'>.</font>";
         }
-
-        // --- Format the Row ---
-        dump += QString("<font color='#888888'>%1:</font>  %2  <font color='#888888'>|</font>  %3\n")
-                    .arg(offset).arg(hex).arg(ascii);
+        dump += ascii + "\n";
     }
 
     dump += "</pre></div>";
+    return dump;
+}
 
-    // Send it to the text edit
-    appendHtml(dump);
+
+// --- Signal Catchers ---
+
+void LogWindow::logStatus(const QString &portName, const QString &msg) {
+    LogEntry e{LogEntry::Status, getTimestamp(), portName, msg, QByteArray()};
+    m_history.append(e);
+    if (m_history.size() > MAX_HISTORY) m_history.removeFirst();
+    appendHtml(buildHtmlForEntry(e));
+}
+
+void LogWindow::logError(const QString &portName, const QString &err) {
+    LogEntry e{LogEntry::Error, getTimestamp(), portName, err, QByteArray()};
+    m_history.append(e);
+    if (m_history.size() > MAX_HISTORY) m_history.removeFirst();
+    appendHtml(buildHtmlForEntry(e));
+}
+
+void LogWindow::logTrace(const QString &portName, const QString &dir, const QByteArray &data) {
+    LogEntry e{LogEntry::Trace, getTimestamp(), portName, dir, data};
+    m_history.append(e);
+    if (m_history.size() > MAX_HISTORY) m_history.removeFirst();
+
+    // Only append to the live feed if it passes our filter
+    QString html = buildHtmlForEntry(e);
+    if (!html.isEmpty()) {
+        appendHtml(html);
+    }
 }
 
 void LogWindow::closeEvent(QCloseEvent *event) {
-    // Hide the window to the system tray instead of destroying it
     this->hide();
     event->ignore();
 }

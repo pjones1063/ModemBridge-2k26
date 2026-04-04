@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_ModemBridgeTray_FILE /home/paul/eclipse-workspace/ModemBridgeTrayApp/ModemBridgeTray)
+set(__QT_DEPLOY_TARGET_ModemBridgeTray_TYPE EXECUTABLE)

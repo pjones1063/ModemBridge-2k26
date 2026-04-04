@@ -11,7 +11,8 @@
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle("ModemBridge Fleet Settings");
-    resize(650, 400);
+    resize(800, 400);
+    setMinimumWidth(700);
 
     setupUi();
 
@@ -64,11 +65,16 @@ void SettingsDialog::setupUi() {
     m_chkSsh = new QCheckBox("SSH Support (Requires libssh)", this);
 
     QHBoxLayout *phonebookLayout = new QHBoxLayout();
+
     m_txtPhonebook = new QLineEdit(this);
     m_btnBrowsePhonebook = new QPushButton("Browse...", this);
+    m_btnNewPhonebook = new QPushButton("New...", this);
     connect(m_btnBrowsePhonebook, &QPushButton::clicked, this, &SettingsDialog::onBrowsePhonebook);
+    connect(m_btnNewPhonebook, &QPushButton::clicked, this, &SettingsDialog::onNewPhonebook);
+
     phonebookLayout->addWidget(m_txtPhonebook);
     phonebookLayout->addWidget(m_btnBrowsePhonebook);
+    phonebookLayout->addWidget(m_btnNewPhonebook);
 
     formLayout->insertRow(0, "Friendly Name:", m_txtFriendlyName);
     formLayout->addRow(m_chkEnable);
@@ -122,7 +128,7 @@ void SettingsDialog::loadAvailablePorts() {
         QListWidgetItem *item = new QListWidgetItem(portName, m_listPorts);
 
         // Add a checkbox to the list item so we can quickly see what's active
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
 
         // If it's in our cache and enabled, check it. Otherwise, uncheck.
         bool isEnabled = m_configCache.contains(portName) && m_configCache[portName].isValid();
@@ -226,4 +232,31 @@ void SettingsDialog::onSaveAndClose() {
     AppSettings::instance().saveBridges(finalConfigs);
 
     accept(); // Closes the dialog
+}
+
+void SettingsDialog::onNewPhonebook() {
+#ifdef Q_OS_MAC
+    QString defaultPath = QDir::homePath();
+#else
+    QString defaultPath = QDir::homePath() + "/phonebook.xml";
+#endif
+
+    QString fileName = QFileDialog::getSaveFileName(this, "Create New Phonebook XML", defaultPath, "XML Files (*.xml);;All Files (*)");
+
+    if (!fileName.isEmpty()) {
+        if (!fileName.endsWith(".xml", Qt::CaseInsensitive)) {
+            fileName += ".xml";
+        }
+
+        // Write a minimal valid XML structure so the PhoneDirectory parser doesn't choke later
+        QFile file(fileName);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream stream(&file);
+            stream << "<EtherTerm>\n  <Phonebook/>\n</EtherTerm>\n";
+            file.close();
+        }
+
+        // Update the text box
+        m_txtPhonebook->setText(fileName);
+    }
 }

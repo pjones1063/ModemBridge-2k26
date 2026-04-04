@@ -23,6 +23,7 @@ private slots:
     void onBrowsePhonebook();
     void saveCurrentFormToCache();
     void onSaveAndClose();
+    void onNewPhonebook();
 
 private:
     void setupUi();
@@ -40,6 +41,7 @@ private:
     QCheckBox *m_chkSsh;
     QLineEdit *m_txtPhonebook;
     QPushButton *m_btnBrowsePhonebook;
+    QPushButton *m_btnNewPhonebook;
     QLineEdit *m_txtFriendlyName;
 
     // --- Data Storage ---

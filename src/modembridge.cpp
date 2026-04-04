@@ -400,11 +400,24 @@ void ModemBridge::onSshError(const QString &msg) {
 void ModemBridge::hangup() {
     emit statusMessage(m_portName, "Hangup initiated.");
 
-    if (m_isSshMode) m_ssh->disconnectFromHost();
-    else             m_socket->disconnectFromHost();
-
+    // Clear any active buffers so AT command mode is completely fresh
+    m_escapeBuffer.clear();
+    m_waitingForSshPassword = false;
     m_isConnected = false;
+
+    // Gracefully drop the network connection
+    if (m_isSshMode) {
+        m_ssh->disconnectFromHost();
+    } else {
+        m_socket->disconnectFromHost();
+    }
+
+    // Note: The async disconnected() signals will fire shortly after this
+    // and automatically print "\r\nNO CARRIER\r\n" back to the Atari.
 }
+
+
+
 
 void ModemBridge::injectMacro(char macroType) {
     if (!m_isConnected) {

@@ -3,7 +3,6 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QFile>
-#include <QFileDialog>
 #include <QDir>
 #include <QDomDocument>
 #include <QTextStream>
@@ -12,11 +11,9 @@
 #include <QDialogButtonBox>
 #include <QRadioButton>
 
-#include <QFileDialog>
-#include <QDir>
-// ... (your other includes)
+PhoneDirectory::PhoneDirectory(const QString &filePath, QWidget *parent)
+    : QDialog(parent), m_filePath(filePath) {
 
-PhoneDirectory::PhoneDirectory(QWidget *parent) : QDialog(parent), m_isDirty(false) {
     setWindowTitle(tr("ModemBridge Phonebook"));
     resize(700, 450);
 
@@ -33,13 +30,10 @@ PhoneDirectory::PhoneDirectory(QWidget *parent) : QDialog(parent), m_isDirty(fal
 
     QHBoxLayout *btnLayout = new QHBoxLayout();
 
-    // --- Renamed and Added Buttons ---
+    // --- Buttons (New XML and Save XML removed) ---
     QPushButton *newEntryBtn = new QPushButton(tr("New Entry"), this);
     QPushButton *editBtn = new QPushButton(tr("Edit"), this);
     QPushButton *delBtn = new QPushButton(tr("Delete"), this);
-
-    QPushButton *newXmlBtn = new QPushButton(tr("New XML"), this); // [NEW]
-    QPushButton *saveBtn = new QPushButton(tr("Save XML"), this);
 
     m_dialBtn = new QPushButton(tr("DIAL"), this);
     QPushButton *closeBtn = new QPushButton(tr("Close"), this);
@@ -48,19 +42,13 @@ PhoneDirectory::PhoneDirectory(QWidget *parent) : QDialog(parent), m_isDirty(fal
     connect(editBtn, &QPushButton::clicked, this, &PhoneDirectory::onEditClicked);
     connect(delBtn, &QPushButton::clicked, this, &PhoneDirectory::onDeleteClicked);
 
-    connect(newXmlBtn, &QPushButton::clicked, this, &PhoneDirectory::onNewXmlClicked); // [NEW]
-    connect(saveBtn, &QPushButton::clicked, this, &PhoneDirectory::onSaveClicked);
-
     connect(m_dialBtn, &QPushButton::clicked, this, &PhoneDirectory::onDialClicked);
-    connect(closeBtn, &QPushButton::clicked, this, &PhoneDirectory::onCloseClicked);
+    connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
 
     // Assembly
     btnLayout->addWidget(newEntryBtn);
     btnLayout->addWidget(editBtn);
     btnLayout->addWidget(delBtn);
-    btnLayout->addSpacing(15); // Visual gap
-    btnLayout->addWidget(newXmlBtn);
-    btnLayout->addWidget(saveBtn);
     btnLayout->addStretch();
     btnLayout->addWidget(m_dialBtn);
     btnLayout->addWidget(closeBtn);
@@ -68,51 +56,22 @@ PhoneDirectory::PhoneDirectory(QWidget *parent) : QDialog(parent), m_isDirty(fal
     mainLayout->addLayout(btnLayout);
     m_dialBtn->setDefault(true);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, &PhoneDirectory::onDialClicked);
-}
 
-// --- The New XML Logic ---
-void PhoneDirectory::onNewXmlClicked() {
-#ifdef Q_OS_MAC
-    QString fileName = QFileDialog::getOpenFileName(this, tr("Create New Dial Directory"), QDir::homePath(), tr("XML Files (*.xml);;All Files (*)"));
-#else
-    QString fileName = QFileDialog::getSaveFileName(this, tr("Create New Dial Directory"), QDir::homePath() + "/phonebook.xml", tr("XML Files (*.xml);;All Files (*)"));
-#endif
-
-    if (fileName.isEmpty()) return;
-
-    if (!fileName.endsWith(".xml", Qt::CaseInsensitive)) {
-        fileName += ".xml";
+    // Automatically load the data if a path was provided
+    if (!m_filePath.isEmpty()) {
+        loadFromFile(m_filePath);
     }
-
-    m_filePath = fileName;
-
-    // Clear out the current UI so they start fresh
-    m_entries.clear();
-    refreshList();
-    m_isDirty = true; // Mark as dirty so they know to hit "Save XML" when done adding entries
-
-    // Auto-prompt them to add their first BBS
-    onAddClicked();
 }
 
-void PhoneDirectory::onSaveClicked() {
-    // Fallback just in case they hit Save before hitting New
-    if (m_filePath.isEmpty()) {
-        onNewXmlClicked();
-        return;
-    }
-    saveToFile();
+void PhoneDirectory::onSearch(const QString &text) {
+    refreshList(text);
 }
-
-void PhoneDirectory::onSearch(const QString &text) { refreshList(text); }
-
 
 void PhoneDirectory::loadFromFile(const QString &path) {
     if (path.isEmpty()) return;
     m_filePath = path;
     parseXml();
     refreshList();
-    m_isDirty = false;
 }
 
 void PhoneDirectory::parseXml() {
@@ -139,7 +98,11 @@ void PhoneDirectory::parseXml() {
 }
 
 void PhoneDirectory::saveToFile() {
-    if (m_filePath.isEmpty()) return;
+    if (m_filePath.isEmpty()) {
+        QMessageBox::warning(this, "Save Error", "No phonebook file path specified. Cannot save.");
+        return;
+    }
+
     QDomDocument doc;
     QDomElement root = doc.createElement("EtherTerm");
     doc.appendChild(root);
@@ -162,16 +125,7 @@ void PhoneDirectory::saveToFile() {
         QTextStream stream(&file);
         stream << doc.toString();
         file.close();
-        m_isDirty = false;
     }
-}
-
-bool PhoneDirectory::checkUnsavedChanges(const QString &actionName) {
-    if (!m_isDirty) return true;
-    auto res = QMessageBox::question(this, "Unsaved Changes", QString("Save before %1?").arg(actionName),
-                                     QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-    if (res == QMessageBox::Yes) { saveToFile(); return true; }
-    return (res == QMessageBox::No);
 }
 
 void PhoneDirectory::refreshList(const QString &filter) {
@@ -192,15 +146,8 @@ void PhoneDirectory::refreshList(const QString &filter) {
 
 void PhoneDirectory::onDialClicked() {
     if (m_tree->currentItem()) {
-        if (checkUnsavedChanges("dialing")) accept();
+        accept();
     }
-}
-
-void PhoneDirectory::onCloseClicked() { if (checkUnsavedChanges("closing")) reject(); }
-
-void PhoneDirectory::closeEvent(QCloseEvent *event) {
-    if (checkUnsavedChanges("closing")) event->accept();
-    else event->ignore();
 }
 
 BbsEntry PhoneDirectory::getSelectedEntry() const {
@@ -220,7 +167,26 @@ bool PhoneDirectory::runEditDialog(BbsEntry &entry) {
     QLineEdit *ipEdit = new QLineEdit(entry.ip);
     QLineEdit *portEdit = new QLineEdit(QString::number(entry.port));
     QLineEdit *userEdit = new QLineEdit(entry.login);
+
+    // --- Password Field with Toggle ---
     QLineEdit *passEdit = new QLineEdit(entry.password);
+    passEdit->setEchoMode(QLineEdit::Password);
+
+    QPushButton *togglePassBtn = new QPushButton("Show");
+    togglePassBtn->setCheckable(true);
+    togglePassBtn->setFixedWidth(60);
+
+    connect(togglePassBtn, &QPushButton::toggled, [passEdit, togglePassBtn](bool checked) {
+        passEdit->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
+        togglePassBtn->setText(checked ? "Hide" : "Show");
+    });
+
+    QWidget *passWidget = new QWidget();
+    QHBoxLayout *passLayout = new QHBoxLayout(passWidget);
+    passLayout->setContentsMargins(0, 0, 0, 0);
+    passLayout->addWidget(passEdit);
+    passLayout->addWidget(togglePassBtn);
+    // ----------------------------------
 
     QRadioButton *rbTelnet = new QRadioButton("Telnet");
     QRadioButton *rbSsh = new QRadioButton("SSH (BBS)");
@@ -237,7 +203,7 @@ bool PhoneDirectory::runEditDialog(BbsEntry &entry) {
     layout.addRow("SSH (BBS):", rbSsh);
     layout.addRow("SSH (Auth):", rbSshAuth);
     layout.addRow("User ID:", userEdit);
-    layout.addRow("Password:", passEdit);
+    layout.addRow("Password:", passWidget);
 
     QDialogButtonBox btns(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     layout.addRow(&btns);
@@ -258,16 +224,24 @@ bool PhoneDirectory::runEditDialog(BbsEntry &entry) {
     return false;
 }
 
+// Data is now auto-saved directly after any modification
 void PhoneDirectory::onAddClicked() {
     BbsEntry e; e.name = "New BBS"; e.port = 23; e.protocol = "TELNET";
-    if (runEditDialog(e)) { m_entries.append(e); refreshList(); m_isDirty = true; }
+    if (runEditDialog(e)) {
+        m_entries.append(e);
+        refreshList();
+        saveToFile();
+    }
 }
 
 void PhoneDirectory::onEditClicked() {
     QTreeWidgetItem *item = m_tree->currentItem();
     if (!item) return;
     int index = item->data(0, Qt::UserRole).toInt();
-    if (runEditDialog(m_entries[index])) { refreshList(); m_isDirty = true; }
+    if (runEditDialog(m_entries[index])) {
+        refreshList();
+        saveToFile();
+    }
 }
 
 void PhoneDirectory::onDeleteClicked() {
@@ -275,5 +249,5 @@ void PhoneDirectory::onDeleteClicked() {
     if (!item) return;
     m_entries.removeAt(item->data(0, Qt::UserRole).toInt());
     refreshList();
-    m_isDirty = true;
+    saveToFile();
 }

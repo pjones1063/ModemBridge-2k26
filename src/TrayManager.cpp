@@ -12,7 +12,6 @@ TrayManager::TrayManager(QObject *parent) : QObject(parent) {
     startBridges();
 }
 
-// THIS IS THE MISSING DESTRUCTOR
 TrayManager::~TrayManager() {
     stopBridges();
     if (m_logWindow) {
@@ -44,7 +43,7 @@ void TrayManager::startBridges() {
     for (const BridgeConfig& config : configs) {
         ModemBridge *bridge = new ModemBridge(this);
 
-        // Identity Injection: ModemBridge signals now require portName [cite: 1, 2]
+        // Identity Injection: ModemBridge signals now require portName
         bridge->setSerialPort(config.portName, config.baudRate);
         bridge->setFlowControl(config.flowControl);
         bridge->setLocalEcho(config.localEcho);
@@ -63,9 +62,11 @@ void TrayManager::startBridges() {
         QMenu *bridgeMenu = trayIconMenu->addMenu(QString("[%1]").arg(menuTitle));
 
         QAction *dialAct = bridgeMenu->addAction("Phonebook / Dial...");
-        connect(dialAct, &QAction::triggered, [this, bridge, config]() {
-            PhoneDirectory pd;
-            pd.loadFromFile(config.phonebookPath);
+
+        // --- UPDATED DIAL ACTION LAMBDA ---
+        connect(dialAct, &QAction::triggered, [bridge, config]() {
+            // Use the new constructor to instantly load the XML path
+            PhoneDirectory pd(config.phonebookPath);
             if (pd.exec() == QDialog::Accepted) {
                 bridge->dial(pd.getSelectedEntry());
             }
@@ -73,7 +74,7 @@ void TrayManager::startBridges() {
 
         bridgeMenu->addSeparator();
 
-        // Connect Macro slots from the tray [cite: 1, 2]
+        // Connect Macro slots from the tray
         QAction *userAct = bridgeMenu->addAction("Send User ID");
         connect(userAct, &QAction::triggered, [bridge]() { bridge->injectMacro('u'); });
 
@@ -82,8 +83,10 @@ void TrayManager::startBridges() {
 
         bridgeMenu->addSeparator();
 
-        QAction *stopAct = bridgeMenu->addAction("Hangup / Stop");
-        connect(stopAct, &QAction::triggered, [bridge]() { bridge->stop(); });
+        // FIX: Rename and call hangup() to keep the serial port alive!
+        QAction *hangupAct = bridgeMenu->addAction("Hangup Call");
+        connect(hangupAct, &QAction::triggered, [bridge]() { bridge->hangup(); });
+
     }
 
     trayIconMenu->addSeparator();
@@ -124,3 +127,4 @@ void TrayManager::showLogs() {
 void TrayManager::quitApp() {
     QApplication::quit();
 }
+
