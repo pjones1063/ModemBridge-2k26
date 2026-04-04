@@ -42,7 +42,12 @@ Built with a nod to classic telecommunications, Modem Bridge 2k26 ensures your A
    ```
 2. Build the project:
    ```bash
-   make all
+   git clone [https://github.com/yourusername/modem-bridge-2k26.git](https://github.com/yourusername/modem-bridge-2k26.git)
+   cd modem-bridge-2k26
+   mkdir build
+   cd build
+   cmake .. -DCMAKE_BUILD_TYPE=Release
+   cmake --build . -j$(nproc)
    ```
 
 ### Basic Usage
