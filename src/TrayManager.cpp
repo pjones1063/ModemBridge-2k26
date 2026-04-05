@@ -52,27 +52,23 @@ void TrayManager::startBridges() {
     for (const BridgeConfig& config : configs) {
         ModemBridge *bridge = new ModemBridge(this);
 
-        // --- WEB UI ROUTING (Outbound Terminal Data Only) ---
-        connect(bridge, &ModemBridge::traceData, this, [this](const QString &portName, const QString &dir, const QByteArray &data) {
-            QString color = dir.startsWith("TX") ? "var(--accent-neon)" : "var(--accent-cyan)";
-            QString safeData;
-            for (char c : data) {
-                quint8 byte = static_cast<quint8>(c);
-                if (byte >= 32 && byte <= 126) safeData += QChar(byte);
-                else if (byte == '\r' || byte == '\n') safeData += QChar(byte);
-                else safeData += ".";
-            }
-            QString html = QString("<span style='color: #888;'>[%1 %2]</span> <span style='color: %3;'>%4</span>")
-                               .arg(portName).arg(dir).arg(color).arg(safeData.toHtmlEscaped());
-
+        // --- WEB UI ROUTING ---
+        // Send Status messages to the Web UI instead of keystrokes
+        connect(bridge, &ModemBridge::statusMessage, this, [this](const QString &portName, const QString &msg) {
+            QString html = QString("<span style='color: #4CAF50;'>[%1] %2</span>").arg(portName).arg(msg.toHtmlEscaped());
             emit m_webBridge->logTraceReceived(portName, html);
         });
 
+        // Send Error messages to the Web UI
+        connect(bridge, &ModemBridge::errorOccurred, this, [this](const QString &portName, const QString &err) {
+            QString html = QString("<span style='color: #F44336;'>[%1] ERROR: %2</span>").arg(portName).arg(err.toHtmlEscaped());
+            emit m_webBridge->logTraceReceived(portName, html);
+        });
+
+        // Keep Port State sync intact
         connect(bridge, &ModemBridge::connectionStateChanged, this, [this](const QString &portName, const QString &state) {
             emit m_webBridge->portStateReceived(portName, state);
         });
-
-        // ----------------------------------------------------
 
         // Identity Injection
         bridge->setSerialPort(config.portName, config.baudRate);

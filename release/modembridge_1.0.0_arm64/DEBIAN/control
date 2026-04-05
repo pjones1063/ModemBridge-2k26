@@ -1,0 +1,5 @@
+Package: modembridge
+Version: 1.0.0
+Architecture: arm64
+Maintainer: Paul <your.email@example.com>
+Description: Atari 8-bit to Modern Network Bridge for Qt6

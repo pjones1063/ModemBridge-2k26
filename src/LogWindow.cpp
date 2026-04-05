@@ -23,7 +23,7 @@ LogWindow::LogWindow(QWidget *parent) : QDialog(parent) {
     m_chkAutoScroll->setChecked(true);
 
     m_chkHexMode = new QCheckBox("Hex Dump Mode", this);
-    m_chkHexMode->setChecked(true);
+    m_chkHexMode->setChecked(false);
     connect(m_chkHexMode, &QCheckBox::toggled, this, &LogWindow::refreshView);
 
     m_btnClear = new QPushButton("Clear Display", this);
@@ -77,6 +77,7 @@ void LogWindow::refreshView() {
     m_textEdit->setUpdatesEnabled(true);
 }
 
+
 QString LogWindow::buildHtmlForEntry(const LogEntry &entry) {
     if (entry.type == LogEntry::Status) {
         return QString("<span style='color: #4CAF50;'>[%1] [%2] %3</span>")
@@ -89,10 +90,10 @@ QString LogWindow::buildHtmlForEntry(const LogEntry &entry) {
     }
 
     // --- THE BULLETPROOF FILTER ---
-    // Since ModemBridge sends "CMD" when disconnected, and "TCP"/"SSH"/"MACRO"
-    // when connected, we just drop anything that isn't a CMD if Hex Mode is off.
-    if (!m_chkHexMode->isChecked() && !entry.msgOrDir.contains("CMD")) {
-        return QString(); // Returns empty, so it appends absolutely nothing.
+    // The user requested NO keystroke spam by default.
+    // If Hex Mode is unchecked, we completely drop trace data.
+    if (!m_chkHexMode->isChecked()) {
+        return QString();
     }
 
     QString headerColor = entry.msgOrDir.startsWith("TX") ? "#C45911" : "#1177C4";
@@ -102,48 +103,35 @@ QString LogWindow::buildHtmlForEntry(const LogEntry &entry) {
                        .arg(headerColor).arg(entry.timestamp).arg(headerColor)
                        .arg(entry.portName).arg(entry.msgOrDir).arg(entry.data.size());
 
-    if (m_chkHexMode->isChecked()) {
-        // FULL HEX DUMP
-        for (int i = 0; i < entry.data.size(); i += 16) {
-            QByteArray chunk = entry.data.mid(i, 16);
-            QString offset = QString("%1").arg(i, 4, 16, QChar('0')).toUpper();
+    // FULL HEX DUMP (Works exactly as it did before when checked)
+    for (int i = 0; i < entry.data.size(); i += 16) {
+        QByteArray chunk = entry.data.mid(i, 16);
+        QString offset = QString("%1").arg(i, 4, 16, QChar('0')).toUpper();
 
-            QString hex;
-            for (int j = 0; j < 16; ++j) {
-                if (j == 8) hex += " ";
-                if (j < chunk.size()) {
-                    quint8 byte = static_cast<quint8>(chunk[j]);
-                    QString bHex = QString("%1").arg(byte, 2, 16, QChar('0')).toUpper();
-                    if (byte == 0x00 || byte == 0x20) {
-                        hex += QString("<font color='#444444'>%1</font> ").arg(bHex);
-                    } else {
-                        hex += bHex + " ";
-                    }
+        QString hex;
+        for (int j = 0; j < 16; ++j) {
+            if (j == 8) hex += " ";
+            if (j < chunk.size()) {
+                quint8 byte = static_cast<quint8>(chunk[j]);
+                QString bHex = QString("%1").arg(byte, 2, 16, QChar('0')).toUpper();
+                if (byte == 0x00 || byte == 0x20) {
+                    hex += QString("<font color='#444444'>%1</font> ").arg(bHex);
                 } else {
-                    hex += "&nbsp;&nbsp; ";
+                    hex += bHex + " ";
                 }
+            } else {
+                hex += "&nbsp;&nbsp; ";
             }
-
-            QString ascii;
-            for (int k = 0; k < chunk.size(); ++k) {
-                quint8 byte = static_cast<quint8>(chunk[k]);
-                if (byte >= 32 && byte <= 126) ascii += QString(QChar(byte)).toHtmlEscaped();
-                else if (byte >= 160 && byte <= 254) ascii += QString(QChar(byte - 128)).toHtmlEscaped();
-                else ascii += "<font color='#444444'>.</font>";
-            }
-            dump += QString("<font color='#888888'>%1:</font>  %2  <font color='#888888'>|</font>  %3\n").arg(offset).arg(hex).arg(ascii);
         }
-    } else {
-        // PLAIN TEXT MODE (Only CMD traces survive the filter at the top to reach here)
+
         QString ascii;
-        for (int k = 0; k < entry.data.size(); ++k) {
-            quint8 byte = static_cast<quint8>(entry.data[k]);
-            if (byte == '\r' || byte == '\n' || byte == '\t') ascii += QChar(byte);
-            else if (byte >= 32 && byte <= 126) ascii += QString(QChar(byte)).toHtmlEscaped();
+        for (int k = 0; k < chunk.size(); ++k) {
+            quint8 byte = static_cast<quint8>(chunk[k]);
+            if (byte >= 32 && byte <= 126) ascii += QString(QChar(byte)).toHtmlEscaped();
             else if (byte >= 160 && byte <= 254) ascii += QString(QChar(byte - 128)).toHtmlEscaped();
             else ascii += "<font color='#444444'>.</font>";
         }
-        dump += ascii + "\n";
+        dump += QString("<font color='#888888'>%1:</font>  %2  <font color='#888888'>|</font>  %3\n").arg(offset).arg(hex).arg(ascii);
     }
 
     dump += "</pre></div>";

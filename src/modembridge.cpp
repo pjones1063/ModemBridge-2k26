@@ -16,8 +16,8 @@ bool ModemBridge::doServerDate() {
         std::tm* now = std::localtime(&t);
         int hour_kk = (now->tm_hour == 0) ? 24 : now->tm_hour;
         std::ostringstream oss;
-        oss << "getdtm "  // The Atari looks for this string first!
-            << std::setfill('0')
+        //oss << "getdtm "  // The Atari looks for this string first!
+        oss << std::setfill('0')
             << std::setw(4) << (now->tm_year + 1900) << " "
             << std::setw(2) << (now->tm_mon + 1) << " "
             << std::setw(2) << now->tm_mday << " "
@@ -40,8 +40,8 @@ bool ModemBridge::doServerY2KDate() {
         int year30 = (now->tm_year + 1900) - 30;
         int hour_kk = (now->tm_hour == 0) ? 24 : now->tm_hour;
         std::ostringstream oss;
-        oss << "getdtm "  // The Atari looks for this string first!
-            << std::setfill('0')
+        // oss << "getdtm "  // The Atari looks for this string first!
+        oss << std::setfill('0')
             << std::setw(4) << (now->tm_year + 1900) << " "
             << std::setw(2) << (now->tm_mon + 1) << " "
             << std::setw(2) << now->tm_mday << " "
@@ -316,58 +316,76 @@ void ModemBridge::processAtCommand(const QByteArray &cmd) {
 
 
 void ModemBridge::dial(const BbsEntry &entry) {
-    m_currentConnection = entry;
+    // 1. Sanitize the entry. The AT parser usually does this automatically,
+    // but the XML Phonebook might contain invisible trailing spaces!
+    BbsEntry safeEntry = entry;
+    safeEntry.ip = safeEntry.ip.trimmed();
+    safeEntry.protocol = safeEntry.protocol.trimmed().toUpper();
+    safeEntry.login = safeEntry.login.trimmed();
 
-    QString proto = entry.protocol.toUpper();
-    m_isSshMode = proto.startsWith("SSH");
+    // 2. Set the global context so connectTo knows exactly what to do
+    m_currentConnection = safeEntry;
 
-    if (m_isSshMode) {
-        QString safeUser = entry.login.isEmpty() ? "guest" : entry.login;
+    // 3. Temporarily suppress NO CARRIER. If we are interrupting an existing
+    // or half-open connection, aborting it will fire a disconnected signal!
+    m_suppressCarrierMessage = true;
 
-        if (proto == "SSH-AUTH") {
-            emit statusMessage(m_portName, "Dialing " + entry.name + " via Authenticated SSH...");
-            m_ssh->connectToHost(entry.ip, entry.port, safeUser, entry.password);
-        } else {
-            emit statusMessage(m_portName, "Dialing " + entry.name + " via Anonymous BBS SSH...");
-            m_ssh->connectToHost(entry.ip, entry.port, safeUser, "");
-        }
-    } else {
-        emit statusMessage(m_portName, "Dialing " + entry.name + " via Telnet/TCP...");
-        connectTo(entry.ip, entry.port);
-    }
+    if (m_socket->state() != QAbstractSocket::UnconnectedState) m_socket->abort();
+    if (m_ssh->isConnected()) m_ssh->disconnectFromHost();
+
+    m_suppressCarrierMessage = false;
+
+    // 4. Execute the dial!
+    connectTo(m_currentConnection.ip, m_currentConnection.port);
 }
+
+
 
 void ModemBridge::dial(const QString &target) {
     processAtCommand(("ATDT " + target).toUtf8());
 }
 
 void ModemBridge::connectTo(const QString &host, int port) {
+    // 1. Sanitize EVERYTHING. This strips hidden XML spaces that break DNS lookups!
+    QString cleanHost = host.trimmed();
+    QString proto = m_currentConnection.protocol.trimmed().toUpper();
+    QString safeUser = m_currentConnection.login.trimmed();
+    if (safeUser.isEmpty()) safeUser = "guest";
+    QString cleanPass = m_currentConnection.password.trimmed();
+
+    bool useSsh = proto.startsWith("SSH") || (port == 22);
+
+    // 2. Unify the SSH paths! If we need a password but don't have one,
+    // trigger the interactive terminal prompt just like ATDT ssh: does!
+    if (useSsh && proto == "SSH-AUTH" && cleanPass.isEmpty()) {
+        m_currentConnection.ip = cleanHost;
+        m_currentConnection.port = port;
+        m_currentConnection.login = safeUser;
+        m_waitingForSshPassword = true;
+        sendToSerial("\r\nPASSWORD: ");
+        return;
+    }
+
     changeState("DIALING...");
 
     if (m_socket->state() != QAbstractSocket::UnconnectedState) m_socket->abort();
     if (m_ssh->isConnected()) m_ssh->disconnectFromHost();
     m_isConnected = false;
 
-    emit statusMessage(m_portName, QString("Dialing %1:%2...").arg(host).arg(port));
+    // Send status to the PC UI and the Atari Terminal
+    emit statusMessage(m_portName, QString("Dialing %1:%2...").arg(cleanHost).arg(port));
     m_serial->write("\r\nDIALING...\r\n");
-
-    QString proto = m_currentConnection.protocol.toUpper();
-    bool useSsh = proto.startsWith("SSH") || (port == 22);
 
     if (useSsh) {
         m_isSshMode = true;
-        QString safeUser = m_currentConnection.login.isEmpty() ? "guest" : m_currentConnection.login;
-
-        if (proto == "SSH-AUTH") {
-            m_ssh->connectToHost(host, port, safeUser, m_currentConnection.password);
-        } else {
-            m_ssh->connectToHost(host, port, safeUser, "");
-        }
+        // 3. Never throw away the password! If it exists, pass it.
+        m_ssh->connectToHost(cleanHost, port, safeUser, cleanPass);
     } else {
         m_isSshMode = false;
-        m_socket->connectToHost(host, port);
+        m_socket->connectToHost(cleanHost, port);
     }
 }
+
 
 void ModemBridge::onSocketConnected() {
     m_isConnected = true;
@@ -437,9 +455,19 @@ void ModemBridge::onSocketDisconnected() {
 void ModemBridge::onSocketError(QAbstractSocket::SocketError socketError) {
     Q_UNUSED(socketError);
     if (m_isSshMode) return;
-    emit errorOccurred(m_portName, m_socket->errorString());
-    if (!m_isConnected) sendToSerial("\r\nNO CARRIER\r\n");
+
+    // Grab the human-readable error from Qt (e.g., "Host not found", "Connection refused")
+    QString errorMsg = m_socket->errorString();
+    emit errorOccurred(m_portName, errorMsg); // Send to PC UI
+
+    if (!m_isConnected) {
+        // Send the verbose error to the Atari terminal before dropping carrier
+        sendToSerial(("\r\nERROR: " + errorMsg + "\r\n").toUtf8());
+        sendToSerial("\r\nNO CARRIER\r\n");
+    }
 }
+
+
 
 void ModemBridge::onSshConnected() {
     m_isConnected = true;
@@ -463,8 +491,13 @@ void ModemBridge::onSshDisconnected() {
 
 void ModemBridge::onSshError(const QString &msg) {
     if (m_isSshMode) {
-        emit errorOccurred(m_portName, "SSH Error: " + msg);
-        if (!m_isConnected) sendToSerial("\r\nNO CARRIER\r\n");
+        emit errorOccurred(m_portName, "SSH Error: " + msg); // Send to PC UI
+
+        if (!m_isConnected) {
+            // Send the specific SSH error (e.g., "Authentication failed") to the Atari
+            sendToSerial(("\r\nERROR: SSH - " + msg + "\r\n").toUtf8());
+            sendToSerial("\r\nNO CARRIER\r\n");
+        }
     }
 }
 
