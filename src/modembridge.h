@@ -26,6 +26,10 @@ public:
     void injectMacro(char macroType);
     void setTcpMode(bool enableSsh);
 
+    QString portName() const { return m_portName; }
+    QString currentState() const { return m_currentState; }
+
+
 public slots:
     void start();
     void stop();
@@ -37,6 +41,7 @@ signals:
     void traceData(const QString &portName, const QString &dir, const QByteArray &data);
     void rxActivity(const QString &portName);
     void txActivity(const QString &portName);
+    void connectionStateChanged(const QString &portName, const QString &state);
 
 private slots:
     void onSerialDataReceived();
@@ -49,6 +54,10 @@ private slots:
     void onSshDisconnected();
     void onSshDataReceived(const QByteArray &data);
     void onSshError(const QString &msg);
+
+protected:
+    bool doServerDate();
+    bool doServerY2KDate();
 
 private:
     QSerialPort *m_serial;
@@ -80,8 +89,8 @@ private:
     bool m_waitingForSshPassword = false;
     void parseInteractiveSshTarget(const QString &target);
     void executeInteractiveSshDial();
-
-    // [NEW] Stores the port name for identification
+    QString m_currentState = "OFFLINE";
+    void changeState(const QString &newState);
     QString m_portName;
 };
 

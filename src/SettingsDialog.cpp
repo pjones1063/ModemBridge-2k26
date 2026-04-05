@@ -85,6 +85,22 @@ void SettingsDialog::setupUi() {
     formLayout->addRow("Phonebook XML:", phonebookLayout);
 
     rightLayout->addWidget(groupConfig);
+
+    QGroupBox *groupGlobal = new QGroupBox("Global Dashboard Settings", this);
+    QFormLayout *globalLayout = new QFormLayout(groupGlobal);
+
+    m_spinHttpPort = new QSpinBox(this);
+    m_spinHttpPort->setRange(1024, 65535);
+    m_spinHttpPort->setValue(AppSettings::instance().httpPort());
+
+    m_spinWsPort = new QSpinBox(this);
+    m_spinWsPort->setRange(1024, 65535);
+    m_spinWsPort->setValue(AppSettings::instance().webSocketPort());
+
+    globalLayout->addRow("HTTP Web Port:", m_spinHttpPort);
+    globalLayout->addRow("WebSocket Data Port:", m_spinWsPort);
+
+    rightLayout->addWidget(groupGlobal);
     rightLayout->addStretch(); // Pushes form to the top
 
     // --- BOTTOM: Save/Cancel ---
@@ -228,9 +244,9 @@ void SettingsDialog::onSaveAndClose() {
     // Extract all valid, enabled configurations from our cache
     QList<BridgeConfig> finalConfigs = m_configCache.values();
 
-    // Save to Registry/Plist
     AppSettings::instance().saveBridges(finalConfigs);
-
+    AppSettings::instance().setHttpPort(m_spinHttpPort->value());
+    AppSettings::instance().setWebSocketPort(m_spinWsPort->value());
     accept(); // Closes the dialog
 }
 

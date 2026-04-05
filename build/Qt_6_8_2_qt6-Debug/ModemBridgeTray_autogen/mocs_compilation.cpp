@@ -5,3 +5,5 @@
 #include "UVLADIE3JM/moc_modembridge.cpp"
 #include "UVLADIE3JM/moc_phonedirectory.cpp"
 #include "UVLADIE3JM/moc_sshclient.cpp"
+#include "UVLADIE3JM/moc_webbridge.cpp"
+#include "UVLADIE3JM/moc_websocketclientwrapper.cpp"

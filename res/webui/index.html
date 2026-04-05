@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ModemBridge 2k26 - Fleet Command</title>
+    <script src="qwebchannel.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        :root {
+            --bg-color: #0d1117; --panel-bg: #161b22; --text-main: #c9d1d9;
+            --accent-neon: #ff79c6; --accent-cyan: #8be9fd; --border-color: #30363d;
+            --terminal-bg: #000000; --terminal-green: #50fa7b;
+            --modal-bg: rgba(0,0,0,0.8); --item-hover: #2c3e50;
+        }
+
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        
+        .navbar { background-color: var(--panel-bg); border-bottom: 1px solid var(--border-color); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .brand { font-size: 1.2rem; font-weight: bold; color: var(--accent-neon); text-shadow: 0 0 5px rgba(255, 121, 198, 0.4); display: flex; align-items: center; gap: 10px; }
+        
+        select.port-selector { background: var(--bg-color); color: var(--accent-cyan); border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; outline: none; cursor: pointer; }
+        
+        /* --- NEW STATUS BADGE STYLES --- */
+        .status-badge { background: #555; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+        .status-badge.connected { background: #28a745; }
+        .status-badge.offline { background: #dc3545; }
+        .status-badge.ready { background: #0055A4; }
+        .status-badge.dialing { background: #f39c12; }
+
+        .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
+        .control-panel { width: 250px; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .action-btn { background: var(--bg-color); color: var(--accent-cyan); border: 1px solid var(--border-color); padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
+        .action-btn:hover { background: #1f2428; border-color: var(--accent-cyan); box-shadow: 0 0 8px rgba(139, 233, 253, 0.2); }
+        .action-btn.danger { color: #ff5555; }
+        .action-btn.danger:hover { border-color: #ff5555; box-shadow: 0 0 8px rgba(255, 85, 85, 0.2); }
+
+        .terminal-container { flex: 1; background: var(--terminal-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 14px; box-shadow: inset 0 0 20px rgba(0,0,0,0.8); }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: var(--modal-bg); }
+        .modal-content { background-color: var(--panel-bg); margin: 5% auto; padding: 0; width: 90%; max-width: 600px; border-radius: 8px; display: flex; flex-direction: column; max-height: 85vh; border: 1px solid var(--border-color); }
+        .modal-header { padding: 15px; background: #0055A4; color: white; display: flex; justify-content: space-between; align-items: center; border-radius: 8px 8px 0 0; }
+        .modal-header h3 { margin: 0; font-size: 18px; }
+        .close-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; }
+        .modal-body { padding: 0; overflow-y: auto; flex: 1; }
+        
+        .pb-search-container { padding: 10px 15px; background: #252525; border-bottom: 1px solid var(--border-color); }
+        .pb-search-input { width: 100%; padding: 8px; background: var(--bg-color); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box; }
+        .pb-item { padding: 12px 15px; border-bottom: 1px solid var(--border-color); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+        .pb-item:hover { background-color: var(--item-hover); }
+        .pb-title { font-size: 16px; font-weight: bold; color: var(--accent-cyan); }
+        .pb-details { font-size: 12px; color: #aaa; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <div class="navbar">
+        <div class="brand"><i class="bi bi-router-fill"></i> MODEM BRIDGE 2k26</div>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <select id="port-selector" class="port-selector"><option value="">No Ports Active</option></select>
+            <div id="connection-status" class="status-badge offline">OFFLINE</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="control-panel">
+            <h3 style="margin-top: 0; color: #888; font-size: 0.9rem; text-transform: uppercase;">Command Uplink</h3>
+            <button class="action-btn" onclick="uiActionPhonebook()"><i class="bi bi-journal-text"></i> Open Phonebook</button>
+            <button class="action-btn" onclick="uiActionMacroUser()"><i class="bi bi-person-fill"></i> Inject User ID</button>
+            <button class="action-btn" onclick="uiActionMacroPass()"><i class="bi bi-key-fill"></i> Inject Password</button>
+            <div style="flex: 1;"></div>
+            <button class="action-btn danger" onclick="uiActionHangup()"><i class="bi bi-telephone-x-fill"></i> Hangup Call</button>
+        </div>
+        <div class="terminal-container" id="terminal-output"><span style="color: #6272a4;">> System initialized. Waiting for WebSocket connection...</span><br></div>
+    </div>
+
+    <div id="pb-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>BBS Phonebook</h3>
+                <button class="close-btn" onclick="closePbModal()"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="pb-search-container">
+                <input type="text" id="pb-search" class="pb-search-input" placeholder="Search BBS Name..." onkeyup="filterPhonebook()">
+            </div>
+            <div class="modal-body" id="pb-list"></div>
+        </div>
+    </div>
+
+    <script>
+        let backend = null;
+        let socket = null;
+        let cachedPbEntries = [];
+
+        function printToTerminal(htmlString) {
+            const term = document.getElementById('terminal-output');
+            term.innerHTML += htmlString + "<br>";
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function getActivePort() {
+            return document.getElementById('port-selector').value;
+        }
+
+        function initWebChannel() {
+            const serverIp = window.location.hostname || "127.0.0.1";
+            
+            // NOTE: If you implemented the dynamic port injection trick in C++, 
+            // the '12345' below will be automatically replaced by your C++ code 
+            // before the browser even sees it!
+            socket = new WebSocket(`ws://${serverIp}:12345`);
+            
+            socket.onopen = function() {
+                document.getElementById('connection-status').className = "status-badge connected";
+                document.getElementById('connection-status').innerText = "WS LINKED";
+                printToTerminal("<span style='color: var(--terminal-green);'>> WebSocket Uplink Established.</span>");
+
+                new QWebChannel(socket, function(channel) {
+                    backend = channel.objects.modemBridgeUI; 
+
+                    // --- TRACE LOGGING ---
+                    backend.logTraceReceived.connect(function(portName, traceDataHtml) {
+                        if (portName === getActivePort() || getActivePort() === "ALL") {
+                            printToTerminal(traceDataHtml);
+                        }
+                    });
+
+                    // --- ACTIVE PORTS DROPDOWN ---
+                    backend.activePortsReceived.connect(function(ports) {
+                        const selector = document.getElementById('port-selector');
+                        selector.innerHTML = '';
+                        ports.forEach(port => {
+                            const opt = document.createElement('option');
+                            opt.value = port; opt.innerText = "PORT: " + port;
+                            selector.appendChild(opt);
+                        });
+                        if(ports.length === 0) selector.innerHTML = '<option value="">No Ports</option>';
+                        
+                        // Ask for the state of whatever port was just auto-selected
+                        const p = getActivePort();
+                        if(p) backend.requestPortState(p);
+                    });
+
+                    // --- LIVE STATUS SYNC ---
+                    backend.portStateReceived.connect(function(portName, state) {
+                        if (portName === getActivePort()) {
+                            const badge = document.getElementById('connection-status');
+                            badge.innerText = state;
+                            
+                            if (state === "CONNECTED") badge.className = "status-badge connected";
+                            else if (state === "OFFLINE") badge.className = "status-badge offline";
+                            else if (state === "DIALING...") badge.className = "status-badge dialing";
+                            else if (state === "READY") badge.className = "status-badge ready";
+                        }
+                    });
+
+                    // Update state when dropdown changes manually
+                    document.getElementById('port-selector').addEventListener('change', function() {
+                        const p = getActivePort();
+                        if(p) backend.requestPortState(p);
+                    });
+
+                    // --- PHONEBOOK ---
+                    backend.phonebookDataReceived.connect(function(entries) {
+                        cachedPbEntries = entries; 
+                        document.getElementById('pb-search').value = ""; 
+                        renderPhonebook(""); 
+                        document.getElementById('pb-modal').style.display = 'block';
+                    });
+
+                    // Initial fetch
+                    backend.requestActivePorts();
+                });
+            };
+
+            socket.onclose = function() {
+                backend = null;
+                document.getElementById('connection-status').className = "status-badge offline";
+                document.getElementById('connection-status').innerText = "WS OFFLINE";
+                printToTerminal("<span style='color: #ff5555;'>> WebSocket Connection Lost. Retrying in 3s...</span>");
+                setTimeout(initWebChannel, 3000);
+            };
+        }
+
+        // --- UI Actions ---
+        function uiActionPhonebook() { if(backend) backend.requestPhonebook(); }
+        function uiActionMacroUser() { const p = getActivePort(); if(backend && p) backend.injectUser(p); }
+        function uiActionMacroPass() { const p = getActivePort(); if(backend && p) backend.injectPass(p); }
+        function uiActionHangup()    { const p = getActivePort(); if(backend && p) backend.hangup(p); }
+
+        // --- Phonebook Logic ---
+        function closePbModal() { document.getElementById('pb-modal').style.display = 'none'; }
+        function filterPhonebook() { renderPhonebook(document.getElementById('pb-search').value.toLowerCase()); }
+        function renderPhonebook(filterString) {
+            const listDiv = document.getElementById('pb-list'); listDiv.innerHTML = ''; 
+            const filtered = cachedPbEntries.filter(bbs => bbs.name.toLowerCase().includes(filterString));
+            if (filtered.length === 0) listDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No matching BBS entries.</div>';
+            else filtered.forEach(bbs => {
+                const item = document.createElement('div'); item.className = 'pb-item';
+                item.innerHTML = `<div class="pb-title"><i class="bi bi-modem"></i> ${bbs.name}</div><div class="pb-details">${bbs.ip}:${bbs.port}  |  ${bbs.protocol}  |  User: ${bbs.login}</div>`;
+                item.onclick = function() { 
+                    const p = getActivePort();
+                    if(p) backend.dialBbs(p, bbs.name, bbs.ip, bbs.port, bbs.protocol, bbs.login, bbs.password); 
+                    closePbModal(); 
+                };
+                listDiv.appendChild(item);
+            });
+        }
+
+        initWebChannel();
+    </script>
+</body>
+</html>

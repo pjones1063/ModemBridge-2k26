@@ -2,6 +2,61 @@
 #include <QDebug>
 #include <QFile>
 #include <QDomDocument>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <ctime>
+#include <exception>
+#include <QSerialPort>
+#include <QByteArray>
+
+bool ModemBridge::doServerDate() {
+    try {
+        std::time_t t = std::time(nullptr);
+        std::tm* now = std::localtime(&t);
+        int hour_kk = (now->tm_hour == 0) ? 24 : now->tm_hour;
+        std::ostringstream oss;
+        oss << "getdtm "  // The Atari looks for this string first!
+            << std::setfill('0')
+            << std::setw(4) << (now->tm_year + 1900) << " "
+            << std::setw(2) << (now->tm_mon + 1) << " "
+            << std::setw(2) << now->tm_mday << " "
+            << std::setw(2) << hour_kk << " "
+            << std::setw(2) << now->tm_min << " "
+            << std::setw(2) << now->tm_sec;
+        QByteArray response = QByteArray::fromStdString(oss.str());
+        sendToSerial(response + "\r\n");
+    } catch (const std::exception& e) {
+        qCritical() << "SEVERE Exception:" << e.what();
+        return false;
+    }
+    return true;
+}
+
+bool ModemBridge::doServerY2KDate() {
+    try {
+        std::time_t t = std::time(nullptr);
+        std::tm* now = std::localtime(&t);
+        int year30 = (now->tm_year + 1900) - 30;
+        int hour_kk = (now->tm_hour == 0) ? 24 : now->tm_hour;
+        std::ostringstream oss;
+        oss << "getdtm "  // The Atari looks for this string first!
+            << std::setfill('0')
+            << std::setw(4) << (now->tm_year + 1900) << " "
+            << std::setw(2) << (now->tm_mon + 1) << " "
+            << std::setw(2) << now->tm_mday << " "
+            << std::setw(2) << hour_kk << " "
+            << std::setw(2) << now->tm_min << " "
+            << std::setw(2) << now->tm_sec;
+        QByteArray response = QByteArray::fromStdString(oss.str());
+        sendToSerial(response + "\r\n");
+    } catch (const std::exception& e) {
+        qCritical() << "SEVERE Exception:" << e.what();
+        return false;
+    }
+    return true;
+}
+
 
 ModemBridge::ModemBridge(QObject *parent) : QObject(parent),
     m_serial(new QSerialPort(this)),
@@ -76,6 +131,7 @@ void ModemBridge::start() {
     } else {
         emit errorOccurred(m_portName, "Failed to open serial port.");
     }
+    changeState("READY");
 }
 
 void ModemBridge::stop() {
@@ -87,6 +143,7 @@ void ModemBridge::stop() {
     m_isActive = false;
     m_isConnected = false;
     emit statusMessage(m_portName, "Bridge stopped.");
+    changeState("OFFLINE");
 }
 
 void ModemBridge::onSerialDataReceived() {
@@ -173,6 +230,14 @@ void ModemBridge::onSerialDataReceived() {
 
 void ModemBridge::processAtCommand(const QByteArray &cmd) {
 
+    if (cmd == "getdtm") {
+        doServerDate();
+        return;
+    }
+    if (cmd == "gety2k") {
+        doServerY2KDate();
+        return;
+    }
     if (m_waitingForSshPassword) {
         m_waitingForSshPassword = false;
         m_currentConnection.password = QString::fromLatin1(cmd).trimmed();
@@ -249,6 +314,7 @@ void ModemBridge::processAtCommand(const QByteArray &cmd) {
     }
 }
 
+
 void ModemBridge::dial(const BbsEntry &entry) {
     m_currentConnection = entry;
 
@@ -276,6 +342,8 @@ void ModemBridge::dial(const QString &target) {
 }
 
 void ModemBridge::connectTo(const QString &host, int port) {
+    changeState("DIALING...");
+
     if (m_socket->state() != QAbstractSocket::UnconnectedState) m_socket->abort();
     if (m_ssh->isConnected()) m_ssh->disconnectFromHost();
     m_isConnected = false;
@@ -303,8 +371,9 @@ void ModemBridge::connectTo(const QString &host, int port) {
 
 void ModemBridge::onSocketConnected() {
     m_isConnected = true;
-    sendToSerial("CONNECT 57600\r\n");
+    sendToSerial("CONNECT \r\n");
     emit statusMessage(m_portName, "Telnet Connected.");
+    changeState("CONNECTED");
 }
 
 void ModemBridge::onSocketDataReceived() {
@@ -376,6 +445,7 @@ void ModemBridge::onSshConnected() {
     m_isConnected = true;
     sendToSerial("CONNECT 57600\r\n");
     emit statusMessage(m_portName, "SSH Connected (Secure).");
+    changeState("CONNECTED");
 }
 
 void ModemBridge::onSshDataReceived(const QByteArray &data) {
@@ -388,6 +458,7 @@ void ModemBridge::onSshDisconnected() {
     m_isConnected = false;
     if (!m_suppressCarrierMessage) sendToSerial("\r\nNO CARRIER\r\n");
     emit statusMessage(m_portName, "SSH Disconnected.");
+    changeState("READY");
 }
 
 void ModemBridge::onSshError(const QString &msg) {
@@ -412,6 +483,7 @@ void ModemBridge::hangup() {
         m_socket->disconnectFromHost();
     }
 
+    changeState("READY");
     // Note: The async disconnected() signals will fire shortly after this
     // and automatically print "\r\nNO CARRIER\r\n" back to the Atari.
 }
@@ -530,6 +602,8 @@ void ModemBridge::parseInteractiveSshTarget(const QString &target) {
 }
 
 void ModemBridge::executeInteractiveSshDial() {
+    changeState("DIALING...");
+
     m_isSshMode = true;
     m_isConnected = false;
 
@@ -540,4 +614,11 @@ void ModemBridge::executeInteractiveSshDial() {
     m_serial->write("\r\nDIALING...\r\n");
 
     m_ssh->connectToHost(m_currentConnection.ip, m_currentConnection.port, m_currentConnection.login, m_currentConnection.password);
+}
+
+void ModemBridge::changeState(const QString &newState) {
+    if (m_currentState != newState) {
+        m_currentState = newState;
+        emit connectionStateChanged(m_portName, newState);
+    }
 }

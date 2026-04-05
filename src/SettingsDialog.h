@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QMap>
+#include <QSpinBox>
 #include "AppSettings.h"
 
 class SettingsDialog : public QDialog {
@@ -43,6 +44,8 @@ private:
     QPushButton *m_btnBrowsePhonebook;
     QPushButton *m_btnNewPhonebook;
     QLineEdit *m_txtFriendlyName;
+    QSpinBox *m_spinHttpPort;
+    QSpinBox *m_spinWsPort;
 
     // --- Data Storage ---
     // We keep a temporary map of configs while the dialog is open.

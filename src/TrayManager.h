@@ -6,7 +6,11 @@
 #include <QMenu>
 #include <QAction>
 #include <vector>
-
+#include <QWebSocketServer>
+#include <QWebChannel>
+#include <QHttpServer>
+#include "websocketclientwrapper.h"
+#include "webbridge.h"
 #include "modembridge.h"
 #include "LogWindow.h"
 
@@ -26,9 +30,17 @@ private slots:
 
 private:
     void setupTrayIcon();
+    void setupWebServer();
+    void restartWebServers();
 
     QSystemTrayIcon *trayIcon;
     QMenu *trayIconMenu;
+    QWebSocketServer *m_webSocketServer;
+    WebSocketClientWrapper *m_clientWrapper;
+    QWebChannel *m_webChannel;
+    WebBridge *m_webBridge;
+    QHttpServer *m_httpServer;
+    QTcpServer *m_httpTcpServer;
 
     // The Garage: Active engines
     std::vector<ModemBridge*> bridges;

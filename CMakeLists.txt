@@ -14,7 +14,10 @@ find_package(Qt6 REQUIRED COMPONENTS
     Gui 
     Widgets 
     SerialPort 
-    Network
+    Network 
+    WebSockets 
+    WebChannel 
+    HttpServer
     Xml
 )
 
@@ -59,6 +62,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::SerialPort
     Qt6::Network
     Qt6::Xml
+    Qt6::WebSockets   
+    Qt6::WebChannel    
+    Qt6::HttpServer
     ${SSH_LIBRARIES}    
 )
 

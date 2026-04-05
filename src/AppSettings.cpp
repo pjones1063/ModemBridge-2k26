@@ -9,7 +9,7 @@ QList<BridgeConfig> AppSettings::loadBridges() {
         m_settings.setArrayIndex(i);
         BridgeConfig config;
         config.portName = m_settings.value("PortName", "").toString();
-        config.friendlyName = m_settings.value("FriendlyName", "").toString(); // [NEW]
+        config.friendlyName = m_settings.value("FriendlyName", "").toString();
         config.baudRate = m_settings.value("BaudRate", 9600).toInt();
         config.flowControl = m_settings.value("FlowControl", true).toBool();
         config.localEcho = m_settings.value("LocalEcho", false).toBool();
@@ -28,7 +28,7 @@ void AppSettings::saveBridges(const QList<BridgeConfig>& bridges) {
         m_settings.setArrayIndex(i);
         const BridgeConfig& config = bridges.at(i);
         m_settings.setValue("PortName", config.portName);
-        m_settings.setValue("FriendlyName", config.friendlyName); // [NEW]
+        m_settings.setValue("FriendlyName", config.friendlyName);
         m_settings.setValue("BaudRate", config.baudRate);
         m_settings.setValue("FlowControl", config.flowControl);
         m_settings.setValue("LocalEcho", config.localEcho);
@@ -36,4 +36,22 @@ void AppSettings::saveBridges(const QList<BridgeConfig>& bridges) {
         m_settings.setValue("PhonebookPath", config.phonebookPath);
     }
     m_settings.endArray();
+}
+
+int AppSettings::httpPort() const {
+    // Default to 8080 if not set
+    return m_settings.value("WebUI/HttpPort", 8080).toInt();
+}
+
+void AppSettings::setHttpPort(int port) {
+    m_settings.setValue("WebUI/HttpPort", port);
+}
+
+int AppSettings::webSocketPort() const {
+    // Default to 12345 if not set
+    return m_settings.value("WebUI/WebSocketPort", 12345).toInt();
+}
+
+void AppSettings::setWebSocketPort(int port) {
+    m_settings.setValue("WebUI/WebSocketPort", port);
 }

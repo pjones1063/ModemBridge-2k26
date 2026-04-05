@@ -24,6 +24,12 @@ public:
         return instance;
     }
 
+    int httpPort() const;
+    void setHttpPort(int port);
+
+    int webSocketPort() const;
+    void setWebSocketPort(int port);
+
     QList<BridgeConfig> loadBridges();
     void saveBridges(const QList<BridgeConfig>& bridges);
 
