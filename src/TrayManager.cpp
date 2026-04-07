@@ -11,6 +11,8 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDomDocument>
+#include <QMessageBox>
+
 
 
 
@@ -50,6 +52,11 @@ void TrayManager::startBridges() {
     }
 
     for (const BridgeConfig& config : configs) {
+
+        if (!config.isEnabled) {
+            continue;
+        }
+
         ModemBridge *bridge = new ModemBridge(this);
 
         // --- WEB UI ROUTING ---
@@ -150,22 +157,20 @@ void TrayManager::showLogs() {
 
 void TrayManager::setupWebServer() {
     int wsPort = AppSettings::instance().webSocketPort();
+    int httpPort = AppSettings::instance().httpPort();
 
+    // 1. Initialize ALL pointers immediately so they are never null or garbage.
     m_webSocketServer = new QWebSocketServer("ModemBridge Web UI", QWebSocketServer::NonSecureMode, this);
-
-    if (!m_webSocketServer->listen(QHostAddress::Any, wsPort)) {
-        m_logWindow->logError("SYSTEM", QString("Failed to start WebSocket server on port %1").arg(wsPort));
-        return;
-    }
-
     m_clientWrapper = new WebSocketClientWrapper(m_webSocketServer, this);
     m_webChannel = new QWebChannel(this);
-    connect(m_clientWrapper, &WebSocketClientWrapper::clientConnected, m_webChannel, &QWebChannel::connectTo);
-
     m_webBridge = new WebBridge(this);
+    m_httpTcpServer = new QTcpServer(this);
+    m_httpServer = new QHttpServer(this);
+
+    connect(m_clientWrapper, &WebSocketClientWrapper::clientConnected, m_webChannel, &QWebChannel::connectTo);
     m_webChannel->registerObject("modemBridgeUI", m_webBridge);
 
-    // --- 1. PORT TARGETED ROUTING ---
+    // --- PORT TARGETED ROUTING ---
     connect(m_webBridge, &WebBridge::sigHangup, this, [this](const QString &portName) {
         for (auto b : bridges) if (b->portName() == portName) b->hangup();
     });
@@ -186,7 +191,7 @@ void TrayManager::setupWebServer() {
         }
     });
 
-    // --- 2. DATA REQUEST ROUTING ---
+    // --- DATA REQUEST ROUTING ---
     connect(m_webBridge, &WebBridge::sigRequestActivePorts, this, [this]() {
         QJsonArray ports;
         for (auto b : bridges) ports.append(b->portName());
@@ -196,7 +201,7 @@ void TrayManager::setupWebServer() {
     connect(m_webBridge, &WebBridge::sigRequestPhonebook, this, [this]() {
         QJsonArray jsonEntries;
         QList<BridgeConfig> configs = AppSettings::instance().loadBridges();
-        if (!configs.isEmpty()) {
+        if (!configs.isEmpty() && !configs.first().phonebookPath.isEmpty()) {
             QFile file(configs.first().phonebookPath);
             if (file.open(QIODevice::ReadOnly)) {
                 QDomDocument doc;
@@ -226,37 +231,38 @@ void TrayManager::setupWebServer() {
         }
     });
 
-    // --- Start HTTP Server ---
-    m_httpTcpServer = new QTcpServer(this);
-    m_httpServer = new QHttpServer(this);
+    // --- 2. Start WebSocket Server safely (IPv4 Forced) ---
+    if (!m_webSocketServer->listen(QHostAddress::AnyIPv4, wsPort)) {
+        QString errMsg = QString("Failed to start WebSocket server on port %1. It may be in use by another application.").arg(wsPort);
+        m_logWindow->logError("SYSTEM", errMsg);
+        QMessageBox::critical(nullptr, "Port Conflict", errMsg);
+    } else {
+        m_logWindow->logStatus("SYSTEM", QString("WebSocket Uplink ACTIVE on port %1").arg(m_webSocketServer->serverPort()));
+    }
 
-    // Route 1: Serve HTML with dynamic port injection
+    // --- 3. Start HTTP Server safely (IPv4 Forced) ---
     m_httpServer->route("/", []() {
         QFile file(":/webui/index.html");
         if (file.open(QIODevice::ReadOnly)) {
             QString html = file.readAll();
-
-            // Inject the custom port into the JS string
             int dynamicWsPort = AppSettings::instance().webSocketPort();
             html.replace("12345", QString::number(dynamicWsPort));
-
             return QHttpServerResponse("text/html", html.toUtf8());
         }
         return QHttpServerResponse(QHttpServerResponder::StatusCode::NotFound);
     });
 
-    // Route 2: Serve JS library
     m_httpServer->route("/qwebchannel.js", []() {
         QFile file(":/webui/qwebchannel.js");
         if (file.open(QIODevice::ReadOnly)) return QHttpServerResponse("application/javascript", file.readAll());
         return QHttpServerResponse(QHttpServerResponder::StatusCode::NotFound);
     });
 
-    // Bind and listen on dynamic HTTP port
-    int httpPort = AppSettings::instance().httpPort();
-    if (!m_httpTcpServer->listen(QHostAddress::Any, httpPort) || !m_httpServer->bind(m_httpTcpServer)) {
-        m_logWindow->logError("SYSTEM", QString("Failed to start HTTP Web UI on port %1").arg(httpPort));
-        m_httpTcpServer->deleteLater();
+    if (!m_httpTcpServer->listen(QHostAddress::AnyIPv4, httpPort) || !m_httpServer->bind(m_httpTcpServer)) {
+        QString errMsg = QString("Failed to start HTTP Web UI on port %1. It may be in use by another application.").arg(httpPort);
+        m_logWindow->logError("SYSTEM", errMsg);
+        QMessageBox::critical(nullptr, "Port Conflict", errMsg);
+        // We DO NOT delete m_httpTcpServer here so it's safe to check later
     } else {
         m_logWindow->logStatus("SYSTEM", QString("Web UI accessible at http://localhost:%1").arg(httpPort));
     }
@@ -264,30 +270,35 @@ void TrayManager::setupWebServer() {
 
 
 void TrayManager::restartWebServers() {
-
     int newWsPort = AppSettings::instance().webSocketPort();
     int newHttpPort = AppSettings::instance().httpPort();
 
-    // Hot-Swap WebSocket Port
-    if (m_webSocketServer->serverPort() != newWsPort) {
+    // Hot-Swap WebSocket Port (Checking if port changed OR if it failed to listen previously)
+    if (m_webSocketServer->serverPort() != newWsPort || !m_webSocketServer->isListening()) {
         m_webSocketServer->close();
-        if (m_webSocketServer->listen(QHostAddress::Any, newWsPort)) {
+        if (m_webSocketServer->listen(QHostAddress::AnyIPv4, newWsPort)) {
             m_logWindow->logStatus("SYSTEM", QString("WebSocket Uplink moved to port %1").arg(newWsPort));
         } else {
-            m_logWindow->logError("SYSTEM", QString("Failed to bind WebSocket to port %1").arg(newWsPort));
+            QString errMsg = QString("Failed to bind WebSocket to port %1. The port may be in use.").arg(newWsPort);
+            m_logWindow->logError("SYSTEM", errMsg);
+            QMessageBox::warning(nullptr, "Port Conflict", errMsg);
         }
     }
 
-    // Hot-Swap HTTP Port
-    if (m_httpTcpServer->serverPort() != newHttpPort) {
+    // Hot-Swap HTTP Port (Checking if port changed OR if it failed to listen previously)
+    if (m_httpTcpServer->serverPort() != newHttpPort || !m_httpTcpServer->isListening()) {
         m_httpTcpServer->close();
-        if (m_httpTcpServer->listen(QHostAddress::Any, newHttpPort)) {
+        if (m_httpTcpServer->listen(QHostAddress::AnyIPv4, newHttpPort)) {
             m_logWindow->logStatus("SYSTEM", QString("Web UI moved to http://localhost:%1").arg(newHttpPort));
         } else {
-            m_logWindow->logError("SYSTEM", QString("Failed to bind HTTP to port %1").arg(newHttpPort));
+            QString errMsg = QString("Failed to bind HTTP Web UI to port %1. The port may be in use.").arg(newHttpPort);
+            m_logWindow->logError("SYSTEM", errMsg);
+            QMessageBox::warning(nullptr, "Port Conflict", errMsg);
         }
     }
 }
+
+
 
 void TrayManager::quitApp() {
     QApplication::quit();

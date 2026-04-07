@@ -1,22 +1,23 @@
 #!/bin/bash
-set -e # Exit immediately if a command fails
+# 1. Setup paths
+RELEASE_DIR="../release"
+BUILD_DIR="../build"
+mkdir -p "$RELEASE_DIR"
 
-TARGET_NAME="ModemBridgeTray"
-APP_NAME="ModemBridge"
-BUILD_DIR="../build_mac"
+# 2. Build the project
+cmake -S .. -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$BUILD_DIR" --target clean
+# sysctl -n hw.ncpu is the Mac equivalent of nproc
+cmake --build "$BUILD_DIR" -j$(sysctl -n hw.ncpu)
 
-echo "==> Building $TARGET_NAME for macOS (Universal)..."
-cmake -S .. -B $BUILD_DIR -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-cmake --build $BUILD_DIR --config Release -j$(sysctl -n hw.ncpu)
-
-echo "==> Packaging DMG..."
-# macdeployqt requires the exact name of the compiled .app bundle
-macdeployqt $BUILD_DIR/${TARGET_NAME}.app -dmg
-
-# Move deliverable to root and rename to the desired app name
-mv $BUILD_DIR/${TARGET_NAME}.dmg ./${APP_NAME}.dmg
-
-# Optional: Leave the build directory intact for faster incremental builds
-# rm -rf $BUILD_DIR
-
-echo "Done! DMG is in the current directory."
+# 3. Deploy and Bundle
+# We point macdeployqt to the .app bundle. 
+# The -executable flag is REQUIRED to bundle non-Qt libraries like libssh.
+# The -dmg flag creates the installer, and -always-overwrite ensures a fresh build.
+if macdeployqt "$BUILD_DIR/ModemBridgeTray.app" -dmg -executable="$BUILD_DIR/ModemBridgeTray.app/Contents/MacOS/ModemBridgeTray" -always-overwrite; then
+    mv "$BUILD_DIR/ModemBridgeTray.dmg" "$RELEASE_DIR/ModemBridge-macOS.dmg"
+    echo "Successfully created macOS DMG."
+else
+    echo "macdeployqt failed. Ensure it is in your PATH."
+    exit 1
+fi

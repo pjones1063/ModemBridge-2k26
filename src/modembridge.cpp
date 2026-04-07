@@ -87,6 +87,9 @@ ModemBridge::ModemBridge(QObject *parent) : QObject(parent),
     connect(m_ssh, &SshClient::disconnected, this, &ModemBridge::onSshDisconnected);
     connect(m_ssh, &SshClient::rxData, this, &ModemBridge::onSshDataReceived);
     connect(m_ssh, &SshClient::error, this, &ModemBridge::onSshError);
+
+    connect(m_serial, &QSerialPort::errorOccurred, this, &ModemBridge::onSerialError);
+
 }
 
 ModemBridge::~ModemBridge() {
@@ -655,3 +658,30 @@ void ModemBridge::changeState(const QString &newState) {
         emit connectionStateChanged(m_portName, newState);
     }
 }
+
+void ModemBridge::onSerialError(QSerialPort::SerialPortError error) {
+    // If the error is a critical hardware disconnect (e.g., USB unplugged)
+    if (error == QSerialPort::ResourceError || error == QSerialPort::DeviceNotFoundError) {
+
+        // 1. Grab the OS-level error message before we close the port
+        QString errMsg = QString("HARDWARE DISCONNECTED: %1").arg(m_serial->errorString());
+
+        // 2. Shut down the dead serial handle immediately so we don't segfault
+        m_serial->close();
+        m_isActive = false;
+
+        // 3. Drop the active phone call if one is happening
+        m_suppressCarrierMessage = true; // Don't try to send NO CARRIER to a dead port!
+        if (m_socket->state() != QAbstractSocket::UnconnectedState) m_socket->abort();
+        if (m_ssh->isConnected()) m_ssh->disconnectFromHost();
+        m_isConnected = false;
+        m_suppressCarrierMessage = false;
+
+        // 4. Alert the C++ Dashboard and the Web UI
+        emit errorOccurred(m_portName, errMsg);
+
+        // 5. Change the Web UI badge to a new FAULT state
+        changeState("FAULT");
+    }
+}
+

@@ -117,7 +117,7 @@ void SettingsDialog::setupUi() {
     outerLayout->addLayout(mainLayout);
     outerLayout->addWidget(btnBox);
 
-    setLayout(outerLayout);
+    // setLayout(outerLayout);
 }
 
 
@@ -149,6 +149,7 @@ void SettingsDialog::loadAvailablePorts() {
         // If it's in our cache and enabled, check it. Otherwise, uncheck.
         bool isEnabled = m_configCache.contains(portName) && m_configCache[portName].isValid();
         item->setCheckState(isEnabled ? Qt::Checked : Qt::Unchecked);
+
     }
 
     if (m_listPorts->count() > 0) m_listPorts->setCurrentRow(0);
@@ -221,14 +222,9 @@ void SettingsDialog::saveCurrentFormToCache() {
     config.localEcho = m_chkLocalEcho->isChecked();
     config.sshEnabled = m_chkSsh->isChecked();
     config.phonebookPath = m_txtPhonebook->text();
+    config.isEnabled = m_chkEnable->isChecked();
+    m_configCache.insert(m_currentEditingPort, config);
 
-    // If it's checked, we definitely save it to the cache.
-    // If it's unchecked, we can remove it from the cache so it doesn't get saved to AppSettings.
-    if (m_chkEnable->isChecked()) {
-        m_configCache.insert(m_currentEditingPort, config);
-    } else {
-        m_configCache.remove(m_currentEditingPort);
-    }
 }
 
 void SettingsDialog::onBrowsePhonebook() {
@@ -239,14 +235,24 @@ void SettingsDialog::onBrowsePhonebook() {
 }
 
 void SettingsDialog::onSaveAndClose() {
+    int newHttp = m_spinHttpPort->value();
+    int newWs = m_spinWsPort->value();
+
+    // The Bouncer: Stop the user from setting identical ports
+    if (newHttp == newWs) {
+        QMessageBox::warning(this, "Port Conflict",
+                             "The HTTP Web UI and the WebSocket Data Port cannot use the same port number. Please choose different ports.");
+        return; // Stop the save process so the dialog stays open
+    }
+
     saveCurrentFormToCache(); // Catch whatever they are looking at right now
 
     // Extract all valid, enabled configurations from our cache
     QList<BridgeConfig> finalConfigs = m_configCache.values();
 
     AppSettings::instance().saveBridges(finalConfigs);
-    AppSettings::instance().setHttpPort(m_spinHttpPort->value());
-    AppSettings::instance().setWebSocketPort(m_spinWsPort->value());
+    AppSettings::instance().setHttpPort(newHttp);
+    AppSettings::instance().setWebSocketPort(newWs);
     accept(); // Closes the dialog
 }
 

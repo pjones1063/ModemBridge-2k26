@@ -27,6 +27,7 @@
         .status-badge.offline { background: #dc3545; }
         .status-badge.ready { background: #0055A4; }
         .status-badge.dialing { background: #f39c12; }
+        .status-badge.fault { background: #8e44ad; } /* Added FAULT state */
 
         .container { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
         .control-panel { width: 250px; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
@@ -52,6 +53,35 @@
         .pb-item:hover { background-color: var(--item-hover); }
         .pb-title { font-size: 16px; font-weight: bold; color: var(--accent-cyan); }
         .pb-details { font-size: 12px; color: #aaa; font-family: monospace; }
+
+        /* --- MOBILE & PORTRAIT RESPONSIVENESS --- */
+        @media (max-width: 768px) {
+            /* 1. Stack the navbar elements so they don't get crushed */
+            .navbar { flex-direction: column; gap: 12px; align-items: stretch; }
+            .navbar > div:last-child { justify-content: space-between; width: 100%; }
+            .port-selector { flex: 1; margin-right: 10px; }
+            
+            /* 2. Switch the main container from Left/Right to Top/Bottom */
+            .container { flex-direction: column; overflow: hidden; }
+            
+            /* 3. Turn the control panel into a touch-friendly wrap grid */
+            .control-panel { width: auto; flex-direction: row; flex-wrap: wrap; padding: 10px; }
+            .control-panel h3 { width: 100%; margin-bottom: 5px; text-align: center; }
+            
+            /* Hide the spacer div so it doesn't break the flex wrap */
+            .control-panel > div[style*="flex: 1"] { display: none; }
+            
+            /* Make standard buttons take up ~48% width (side-by-side) */
+            .action-btn { flex: 1 1 45%; justify-content: center; font-size: 0.85rem; padding: 8px; }
+            
+            /* Make the Hangup button span the full width at the bottom */
+            .action-btn.danger { flex: 1 1 100%; margin-top: 5px; }
+            
+            /* 4. Modal adjustments for smaller screens */
+            .modal-content { width: 95%; margin: 10% auto; max-height: 80vh; }
+            .pb-title { font-size: 14px; }
+            .pb-details { font-size: 11px; }
+        }
     </style>
 </head>
 <body>
@@ -105,11 +135,8 @@
         }
 
         function initWebChannel() {
-            const serverIp = window.location.hostname || "127.0.0.1";
+            const serverIp = window.location.hostname || "localhost";
             
-            // NOTE: If you implemented the dynamic port injection trick in C++, 
-            // the '12345' below will be automatically replaced by your C++ code 
-            // before the browser even sees it!
             socket = new WebSocket(`ws://${serverIp}:12345`);
             
             socket.onopen = function() {
@@ -153,6 +180,7 @@
                             else if (state === "OFFLINE") badge.className = "status-badge offline";
                             else if (state === "DIALING...") badge.className = "status-badge dialing";
                             else if (state === "READY") badge.className = "status-badge ready";
+                            else if (state === "FAULT") badge.className = "status-badge fault";
                         }
                     });
 

@@ -54,6 +54,8 @@ private slots:
     void onSshDisconnected();
     void onSshDataReceived(const QByteArray &data);
     void onSshError(const QString &msg);
+    void onSerialError(QSerialPort::SerialPortError error);
+
 
 protected:
     bool doServerDate();
