@@ -62,7 +62,6 @@ void SettingsDialog::setupUi() {
 
     m_chkFlowControl = new QCheckBox("Hardware Flow Control (RTS/CTS)", this);
     m_chkLocalEcho = new QCheckBox("Local Echo (Half Duplex)", this);
-    m_chkSsh = new QCheckBox("SSH Support (Requires libssh)", this);
 
     QHBoxLayout *phonebookLayout = new QHBoxLayout();
 
@@ -81,7 +80,6 @@ void SettingsDialog::setupUi() {
     formLayout->addRow("Baud Rate:", m_cmbBaudRate);
     formLayout->addRow(m_chkFlowControl);
     formLayout->addRow(m_chkLocalEcho);
-    formLayout->addRow(m_chkSsh);
     formLayout->addRow("Phonebook XML:", phonebookLayout);
 
     rightLayout->addWidget(groupConfig);
@@ -141,19 +139,25 @@ void SettingsDialog::loadAvailablePorts() {
 
     // 3. Populate List
     for (const QString &portName : allPorts) {
-        QListWidgetItem *item = new QListWidgetItem(portName, m_listPorts);
+        // --- NEW: Determine visual display text ---
+        QString displayText = portName;
+        if (m_configCache.contains(portName) && !m_configCache[portName].friendlyName.isEmpty()) {
+            displayText = m_configCache[portName].friendlyName + " (" + portName + ")";
+        }
 
-        // Add a checkbox to the list item so we can quickly see what's active
+        QListWidgetItem *item = new QListWidgetItem(displayText, m_listPorts);
+
+        // --- NEW: Store the raw portName invisibly so we don't break the cache lookup ---
+        item->setData(Qt::UserRole, portName);
+
         item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
-
-        // If it's in our cache and enabled, check it. Otherwise, uncheck.
-        bool isEnabled = m_configCache.contains(portName) && m_configCache[portName].isValid();
+        bool isEnabled = m_configCache.contains(portName) && m_configCache[portName].isEnabled;
         item->setCheckState(isEnabled ? Qt::Checked : Qt::Unchecked);
-
     }
 
     if (m_listPorts->count() > 0) m_listPorts->setCurrentRow(0);
 }
+
 
 void SettingsDialog::onAddCustomPort() {
     bool ok;
@@ -162,11 +166,17 @@ void SettingsDialog::onAddCustomPort() {
                                          QLineEdit::Normal, "", &ok);
     if (ok && !text.isEmpty()) {
         QListWidgetItem *item = new QListWidgetItem(text, m_listPorts);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+
+        // --- NEW: Store the invisible key ---
+        item->setData(Qt::UserRole, text);
+
+        item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
         item->setCheckState(Qt::Unchecked);
         m_listPorts->setCurrentItem(item);
     }
 }
+
+
 
 void SettingsDialog::onPortSelectionChanged(QListWidgetItem *current, QListWidgetItem *previous) {
     if (previous) {
@@ -174,7 +184,8 @@ void SettingsDialog::onPortSelectionChanged(QListWidgetItem *current, QListWidge
     }
 
     if (current) {
-        m_currentEditingPort = current->text();
+        // --- FIX: Read the invisible key, NOT the visible text ---
+        m_currentEditingPort = current->data(Qt::UserRole).toString();
 
         // Update checkbox based on list selection
         m_chkEnable->blockSignals(true);
@@ -193,23 +204,31 @@ void SettingsDialog::onPortSelectionChanged(QListWidgetItem *current, QListWidge
     }
 }
 
+
 void SettingsDialog::updateFormFromConfig(const BridgeConfig &config) {
     m_txtFriendlyName->setText(config.friendlyName);
     m_cmbBaudRate->setCurrentText(QString::number(config.baudRate));
     m_chkFlowControl->setChecked(config.flowControl);
     m_chkLocalEcho->setChecked(config.localEcho);
-    m_chkSsh->setChecked(config.sshEnabled);
     m_txtPhonebook->setText(config.phonebookPath);
 }
 
 void SettingsDialog::saveCurrentFormToCache() {
     if (m_currentEditingPort.isEmpty()) return;
 
-    // Find the item in the list to check if they enabled/disabled it via the form checkbox
+    // Find the item in the list using the hidden data key
     for (int i = 0; i < m_listPorts->count(); ++i) {
         QListWidgetItem *item = m_listPorts->item(i);
-        if (item->text() == m_currentEditingPort) {
+        if (item->data(Qt::UserRole).toString() == m_currentEditingPort) {
             item->setCheckState(m_chkEnable->isChecked() ? Qt::Checked : Qt::Unchecked);
+
+            // --- NEW: Update the visual list text dynamically when saving ---
+            QString currentFriendly = m_txtFriendlyName->text();
+            if (!currentFriendly.isEmpty()) {
+                item->setText(currentFriendly + " (" + m_currentEditingPort + ")");
+            } else {
+                item->setText(m_currentEditingPort);
+            }
             break;
         }
     }
@@ -220,12 +239,11 @@ void SettingsDialog::saveCurrentFormToCache() {
     config.baudRate = m_cmbBaudRate->currentText().toInt();
     config.flowControl = m_chkFlowControl->isChecked();
     config.localEcho = m_chkLocalEcho->isChecked();
-    config.sshEnabled = m_chkSsh->isChecked();
     config.phonebookPath = m_txtPhonebook->text();
     config.isEnabled = m_chkEnable->isChecked();
     m_configCache.insert(m_currentEditingPort, config);
-
 }
+
 
 void SettingsDialog::onBrowsePhonebook() {
     QString fileName = QFileDialog::getOpenFileName(this, "Select Phonebook XML", "", "XML Files (*.xml);;All Files (*)");

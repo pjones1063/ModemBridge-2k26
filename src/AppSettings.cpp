@@ -13,7 +13,6 @@ QList<BridgeConfig> AppSettings::loadBridges() {
         config.baudRate = m_settings.value("BaudRate", 9600).toInt();
         config.flowControl = m_settings.value("FlowControl", true).toBool();
         config.localEcho = m_settings.value("LocalEcho", false).toBool();
-        config.sshEnabled = m_settings.value("SshEnabled", false).toBool();
         config.phonebookPath = m_settings.value("PhonebookPath", "").toString();
         config.isEnabled = m_settings.value("IsEnabled", false).toBool();
 
@@ -33,12 +32,12 @@ void AppSettings::saveBridges(const QList<BridgeConfig>& bridges) {
         m_settings.setValue("BaudRate", config.baudRate);
         m_settings.setValue("FlowControl", config.flowControl);
         m_settings.setValue("LocalEcho", config.localEcho);
-        m_settings.setValue("SshEnabled", config.sshEnabled);
         m_settings.setValue("PhonebookPath", config.phonebookPath);
         m_settings.setValue("IsEnabled", config.isEnabled);
     }
     m_settings.endArray();
 }
+
 
 int AppSettings::httpPort() const {
     int http = m_settings.value("WebUI/HttpPort", 8080).toInt();

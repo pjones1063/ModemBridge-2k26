@@ -11,7 +11,6 @@ struct BridgeConfig {
     int baudRate = 9600;
     bool flowControl = true;
     bool localEcho = false;
-    bool sshEnabled = false;
     QString phonebookPath;
     bool isEnabled = true;
     bool isValid() const { return !portName.isEmpty(); }

@@ -39,7 +39,6 @@ private:
     QComboBox *m_cmbBaudRate;
     QCheckBox *m_chkFlowControl;
     QCheckBox *m_chkLocalEcho;
-    QCheckBox *m_chkSsh;
     QLineEdit *m_txtPhonebook;
     QPushButton *m_btnBrowsePhonebook;
     QPushButton *m_btnNewPhonebook;

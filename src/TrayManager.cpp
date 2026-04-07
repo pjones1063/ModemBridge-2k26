@@ -33,13 +33,24 @@ TrayManager::~TrayManager() {
 void TrayManager::setupTrayIcon() {
     trayIconMenu = new QMenu();
     trayIcon = new QSystemTrayIcon(this);
+
+    // This handles the standard Right-Click automatically
     trayIcon->setContextMenu(trayIconMenu);
 
-    // Fallback icon if custom one isn't loaded
-    trayIcon->setIcon(QApplication::style()->standardIcon(QStyle::SP_DriveNetIcon));
+    //trayIcon->setIcon(QApplication::style()->standardIcon(QStyle::SP_DriveNetIcon));
+    trayIcon->setIcon(QIcon(":icons/app_icon.png"));
     trayIcon->setToolTip("ModemBridge Fleet");
     trayIcon->show();
+
+    // --- NEW: Handle Left-Click to show the menu ---
+    connect(trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        // 'Trigger' usually represents a single left-click on the tray icon
+        if (reason == QSystemTrayIcon::Trigger) {
+            trayIconMenu->popup(QCursor::pos());
+        }
+    });
 }
+
 
 void TrayManager::startBridges() {
     stopBridges();
