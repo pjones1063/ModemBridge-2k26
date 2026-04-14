@@ -26,6 +26,7 @@ private slots:
     void onSaveAndClose();
     void onNewPhonebook();
 
+
 private:
     void setupUi();
     void updateFormFromConfig(const BridgeConfig &config);
@@ -45,6 +46,7 @@ private:
     QLineEdit *m_txtFriendlyName;
     QSpinBox *m_spinHttpPort;
     QSpinBox *m_spinWsPort;
+    QSpinBox *m_spinListenPort;
 
     // --- Data Storage ---
     // We keep a temporary map of configs while the dialog is open.

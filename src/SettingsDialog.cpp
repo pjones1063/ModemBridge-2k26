@@ -63,6 +63,12 @@ void SettingsDialog::setupUi() {
     m_chkFlowControl = new QCheckBox("Hardware Flow Control (RTS/CTS)", this);
     m_chkLocalEcho = new QCheckBox("Local Echo (Half Duplex)", this);
 
+
+    m_spinListenPort = new QSpinBox(this);
+    m_spinListenPort->setRange(0, 65535); // 0 disables the listener
+    m_spinListenPort->setSpecialValueText("0 (Disabled)");
+
+
     QHBoxLayout *phonebookLayout = new QHBoxLayout();
 
     m_txtPhonebook = new QLineEdit(this);
@@ -78,6 +84,7 @@ void SettingsDialog::setupUi() {
     formLayout->insertRow(0, "Friendly Name:", m_txtFriendlyName);
     formLayout->addRow(m_chkEnable);
     formLayout->addRow("Baud Rate:", m_cmbBaudRate);
+    formLayout->addRow("Inbound BBS Port:", m_spinListenPort);
     formLayout->addRow(m_chkFlowControl);
     formLayout->addRow(m_chkLocalEcho);
     formLayout->addRow("Phonebook XML:", phonebookLayout);
@@ -210,6 +217,7 @@ void SettingsDialog::updateFormFromConfig(const BridgeConfig &config) {
     m_cmbBaudRate->setCurrentText(QString::number(config.baudRate));
     m_chkFlowControl->setChecked(config.flowControl);
     m_chkLocalEcho->setChecked(config.localEcho);
+    m_spinListenPort->setValue(config.listenPort);
     m_txtPhonebook->setText(config.phonebookPath);
 }
 
@@ -241,38 +249,10 @@ void SettingsDialog::saveCurrentFormToCache() {
     config.localEcho = m_chkLocalEcho->isChecked();
     config.phonebookPath = m_txtPhonebook->text();
     config.isEnabled = m_chkEnable->isChecked();
+    config.listenPort = m_spinListenPort->value();
     m_configCache.insert(m_currentEditingPort, config);
 }
 
-
-void SettingsDialog::onBrowsePhonebook() {
-    QString fileName = QFileDialog::getOpenFileName(this, "Select Phonebook XML", "", "XML Files (*.xml);;All Files (*)");
-    if (!fileName.isEmpty()) {
-        m_txtPhonebook->setText(fileName);
-    }
-}
-
-void SettingsDialog::onSaveAndClose() {
-    int newHttp = m_spinHttpPort->value();
-    int newWs = m_spinWsPort->value();
-
-    // The Bouncer: Stop the user from setting identical ports
-    if (newHttp == newWs) {
-        QMessageBox::warning(this, "Port Conflict",
-                             "The HTTP Web UI and the WebSocket Data Port cannot use the same port number. Please choose different ports.");
-        return; // Stop the save process so the dialog stays open
-    }
-
-    saveCurrentFormToCache(); // Catch whatever they are looking at right now
-
-    // Extract all valid, enabled configurations from our cache
-    QList<BridgeConfig> finalConfigs = m_configCache.values();
-
-    AppSettings::instance().saveBridges(finalConfigs);
-    AppSettings::instance().setHttpPort(newHttp);
-    AppSettings::instance().setWebSocketPort(newWs);
-    accept(); // Closes the dialog
-}
 
 void SettingsDialog::onNewPhonebook() {
 #ifdef Q_OS_MAC
@@ -299,4 +279,62 @@ void SettingsDialog::onNewPhonebook() {
         // Update the text box
         m_txtPhonebook->setText(fileName);
     }
+}
+
+void SettingsDialog::onBrowsePhonebook() {
+    QString fileName = QFileDialog::getOpenFileName(this, "Select Phonebook XML", "", "XML Files (*.xml);;All Files (*)");
+    if (!fileName.isEmpty()) {
+        m_txtPhonebook->setText(fileName);
+    }
+}
+
+
+void SettingsDialog::onSaveAndClose() {
+    int newHttp = m_spinHttpPort->value();
+    int newWs = m_spinWsPort->value();
+
+    // The Bouncer Part 1: Web UI Port Conflict
+    if (newHttp == newWs) {
+        QMessageBox::warning(this, "Port Conflict",
+                             "The HTTP Web UI and the WebSocket Data Port cannot use the same port number. Please choose different ports.");
+        return; // Stop the save process so the dialog stays open
+    }
+
+    saveCurrentFormToCache(); // Catch whatever they are looking at right now
+
+    // Extract all valid configurations from our cache
+    QList<BridgeConfig> finalConfigs = m_configCache.values();
+
+    // --- NEW: The Fleet Port Collision Check ---
+    QSet<int> usedListenPorts;
+
+    for (const BridgeConfig& config : finalConfigs) {
+        // We only care if the bridge is actively enabled and has a port assigned (> 0)
+        if (config.isEnabled && config.listenPort > 0) {
+
+            // Check 1: Is another Atari already using this port?
+            if (usedListenPorts.contains(config.listenPort)) {
+                QMessageBox::warning(this, "BBS Listener Conflict",
+                                     QString("Multiple active bridges are trying to use inbound port %1.\n\nEach enabled bridge must have a unique listening port, or be set to 0 (Disabled).")
+                                         .arg(config.listenPort));
+                return; // Stop save
+            }
+            usedListenPorts.insert(config.listenPort);
+
+            // Check 2: Is it colliding with our Web Dashboard?
+            if (config.listenPort == newHttp || config.listenPort == newWs) {
+                QMessageBox::warning(this, "Reserved Port Conflict",
+                                     QString("Bridge '%1' is trying to use port %2, which is reserved for the Web Dashboard.\n\nPlease assign a different inbound port.")
+                                         .arg(config.friendlyName.isEmpty() ? config.portName : config.friendlyName)
+                                         .arg(config.listenPort));
+                return; // Stop save
+            }
+        }
+    }
+
+    // If we made it past all the bouncers, save to disk!
+    AppSettings::instance().saveBridges(finalConfigs);
+    AppSettings::instance().setHttpPort(newHttp);
+    AppSettings::instance().setWebSocketPort(newWs);
+    accept(); // Closes the dialog
 }

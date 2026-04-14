@@ -13,6 +13,7 @@ struct BridgeConfig {
     bool localEcho = false;
     QString phonebookPath;
     bool isEnabled = true;
+    int listenPort = 0;
     bool isValid() const { return !portName.isEmpty(); }
 };
 

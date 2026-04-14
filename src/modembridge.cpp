@@ -62,6 +62,9 @@ ModemBridge::ModemBridge(QObject *parent) : QObject(parent),
     m_serial(new QSerialPort(this)),
     m_socket(new QTcpSocket(this)),
     m_ssh(new SshClient(this)),
+    m_tcpServer(new QTcpServer(this)),
+    m_pendingSocket(nullptr),
+    m_ringTimer(new QTimer(this)),
     m_isActive(false),
     m_isConnected(false),
     m_isSshMode(false),
@@ -89,6 +92,9 @@ ModemBridge::ModemBridge(QObject *parent) : QObject(parent),
     connect(m_ssh, &SshClient::error, this, &ModemBridge::onSshError);
 
     connect(m_serial, &QSerialPort::errorOccurred, this, &ModemBridge::onSerialError);
+
+    connect(m_tcpServer, &QTcpServer::newConnection, this, &ModemBridge::onNewConnection);
+    connect(m_ringTimer, &QTimer::timeout, this, &ModemBridge::onRingTimeout);
 
 }
 
@@ -128,26 +134,38 @@ void ModemBridge::setTcpMode(bool enableSsh) {
 void ModemBridge::start() {
     if (m_serial->open(QIODevice::ReadWrite)) {
         m_isActive = true;
-        emit statusMessage(m_portName, "Serial port opened.");
+        emit statusMessage(m_portName, "Modem Bridge: Serial port opened.");
         m_serial->setDataTerminalReady(true);
         m_serial->setRequestToSend(true);
+
+        if (m_listenPort > 0) {
+            setListenPort(m_listenPort);
+        }
     } else {
-        emit errorOccurred(m_portName, "Failed to open serial port.");
+        emit errorOccurred(m_portName, "Modem Bridge: Failed to open serial port.");
     }
-    changeState("READY");
 }
+
 
 void ModemBridge::stop() {
     if (m_serial->isOpen()) m_serial->close();
 
+    // Close both types of outbound connections
     if (m_socket->state() != QAbstractSocket::UnconnectedState) m_socket->disconnectFromHost();
     if (m_ssh->isConnected()) m_ssh->disconnectFromHost();
 
+    // [UPDATED] Cleanly shut down the inbound listener
+    m_tcpServer->close();
+
+    if (m_pendingSocket) {
+        m_pendingSocket->disconnectFromHost();
+        m_pendingSocket->deleteLater();
+        m_pendingSocket = nullptr;
+    }
     m_isActive = false;
     m_isConnected = false;
-    emit statusMessage(m_portName, "Bridge stopped.");
-    changeState("OFFLINE");
 }
+
 
 void ModemBridge::onSerialDataReceived() {
     QByteArray data = m_serial->readAll();
@@ -296,6 +314,59 @@ void ModemBridge::processAtCommand(const QByteArray &cmd) {
 
         connectTo(host, port);
     }
+
+    // ANSWERING:
+    else if (upperCmd == "A") {
+        if (m_pendingSocket && m_pendingSocket->state() == QAbstractSocket::ConnectedState) {
+            m_ringTimer->stop();
+
+            m_socket->disconnect();
+            m_socket->deleteLater();
+
+            m_socket = m_pendingSocket;
+            m_pendingSocket = nullptr;
+
+            connect(m_socket, &QTcpSocket::readyRead, this, &ModemBridge::onSocketDataReceived);
+            connect(m_socket, &QTcpSocket::disconnected, this, &ModemBridge::onSocketDisconnected);
+            connect(m_socket, &QAbstractSocket::errorOccurred, this, &ModemBridge::onSocketError);
+
+            m_isSshMode = false;
+            m_isConnected = true;
+
+            sendToSerial("\r\nCONNECT\r\n");
+            emit statusMessage(m_portName, "Inbound Telnet Connected.");
+            changeState("CONNECTED");
+        } else {
+            m_serial->write("\r\nNO CARRIER\r\n");
+        }
+    }
+
+    else if (upperCmd == "O" || upperCmd.startsWith("O0")) {
+        // First, check if the underlying connection actually exists!
+        bool hasActiveConnection = (m_socket->state() == QAbstractSocket::ConnectedState) || m_ssh->isConnected();
+
+        if (hasActiveConnection) {
+            m_isConnected = true;
+            m_serial->write("\r\nCONNECT\r\n"); // Standard Hayes response for going back online
+            emit statusMessage(m_portName, "Returned to Online Data State.");
+            changeState("CONNECTED");
+        } else {
+            // If they typed ATO but the BBS had already hung up in the background
+            m_serial->write("\r\nNO CARRIER\r\n");
+        }
+    }
+
+
+    // AUTO-ANSWER:
+    else if (upperCmd.startsWith("S0=")) {
+        bool ok;
+        int rings = upperCmd.mid(3).toInt(&ok);
+        if (ok) {
+            m_autoAnswerRings = rings;
+        }
+        m_serial->write("\r\nOK\r\n");
+    }
+
     else if (upperCmd.startsWith("H")) {
         hangup();
         m_serial->write("\r\nOK\r\n");
@@ -453,7 +524,11 @@ void ModemBridge::onSocketDisconnected() {
     m_isConnected = false;
     if (!m_suppressCarrierMessage) sendToSerial("\r\nNO CARRIER\r\n");
     emit statusMessage(m_portName, "Disconnected.");
+
+    // ADD THIS LINE to sync the Web UI state!
+    changeState("READY");
 }
+
 
 void ModemBridge::onSocketError(QAbstractSocket::SocketError socketError) {
     Q_UNUSED(socketError);
@@ -685,3 +760,85 @@ void ModemBridge::onSerialError(QSerialPort::SerialPortError error) {
     }
 }
 
+
+void ModemBridge::setListenPort(int port) {
+    m_listenPort = port;
+
+    // If the port is valid and the bridge is active, start listening
+    if (m_listenPort > 0 && m_isActive) {
+
+        // If already listening on the correct port, do nothing
+        if (m_tcpServer->isListening() && m_tcpServer->serverPort() == m_listenPort) {
+            return;
+        }
+
+        // Restart the server on the new port
+        m_tcpServer->close();
+        if (m_tcpServer->listen(QHostAddress::Any, m_listenPort)) {
+            emit statusMessage(m_portName, QString("Modem Bridge: Listening for inbound callers on port %1").arg(m_listenPort));
+        } else {
+            emit errorOccurred(m_portName, QString("Modem Bridge: Failed to start listener on port %1").arg(m_listenPort));
+        }
+    }
+    // If port is 0, or the bridge is inactive, shut down the listener
+    else {
+        if (m_tcpServer->isListening()) {
+            m_tcpServer->close();
+            emit statusMessage(m_portName, "Modem Bridge: BBS listener stopped.");
+        }
+    }
+}
+
+
+
+void ModemBridge::onNewConnection() {
+    QTcpSocket *client = m_tcpServer->nextPendingConnection();
+
+    // --- BULLETPROOF SMART CALL REJECTION ---
+    // Instead of just relying on the m_isConnected boolean, we check the actual
+    // hardware/socket states to see if the modem is tied up.
+    bool isBusy = m_isConnected ||
+                  m_pendingSocket != nullptr ||
+                  m_currentState == "DIALING..." ||
+                  m_waitingForSshPassword ||
+                  m_socket->state() != QAbstractSocket::UnconnectedState ||
+                  m_ssh->isConnected();
+
+    if (isBusy) {
+        client->write("\r\nBUSY\r\n");
+        // Flush ensures the BUSY text actually leaves the PC before we drop the line
+        client->flush();
+        client->disconnectFromHost();
+        client->deleteLater();
+        return;
+    }
+
+    // If the line is truly free, accept the call and start ringing
+    m_pendingSocket = client;
+    m_ringCount = 0;
+
+    onRingTimeout();
+    m_ringTimer->start(3000);
+    changeState("RINGING");
+}
+
+
+
+void ModemBridge::onRingTimeout() {
+    // If the caller hung up before we answered
+    if (!m_pendingSocket || m_pendingSocket->state() != QAbstractSocket::ConnectedState) {
+        m_ringTimer->stop();
+        if (m_pendingSocket) m_pendingSocket->deleteLater();
+        m_pendingSocket = nullptr;
+        changeState("READY");
+        return;
+    }
+
+    m_ringCount++;
+    sendToSerial("\r\nRING\r\n");
+
+    // Check for ATS0 auto-answer
+    if (m_autoAnswerRings > 0 && m_ringCount >= m_autoAnswerRings) {
+        processAtCommand("ATA");
+    }
+}

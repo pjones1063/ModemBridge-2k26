@@ -2,6 +2,7 @@
 #include "SettingsDialog.h"
 #include "AppSettings.h"
 #include "phonedirectory.h"
+#include "AboutDialog.h"
 #include <QApplication>
 #include <QStyle>
 #include <QDebug>
@@ -12,8 +13,6 @@
 #include <QJsonObject>
 #include <QDomDocument>
 #include <QMessageBox>
-
-
 
 
 TrayManager::TrayManager(QObject *parent) : QObject(parent) {
@@ -88,11 +87,14 @@ void TrayManager::startBridges() {
             emit m_webBridge->portStateReceived(portName, state);
         });
 
-        // Identity Injection
+        // --- IDENTITY INJECTION ---
         bridge->setSerialPort(config.portName, config.baudRate);
         bridge->setFlowControl(config.flowControl);
         bridge->setLocalEcho(config.localEcho);
         bridge->setPhonebookPath(config.phonebookPath);
+
+        // Ensure the inbound TCP listener spins up correctly on boot
+        bridge->setListenPort(config.listenPort);
 
         // Plug diagnostic cables into the LogWindow
         connect(bridge, &ModemBridge::statusMessage, m_logWindow, &LogWindow::logStatus);
@@ -136,11 +138,15 @@ void TrayManager::startBridges() {
     QAction *logAct = trayIconMenu->addAction("View Dashboard");
     connect(logAct, &QAction::triggered, this, &TrayManager::showLogs);
 
+    QAction *abountAct = trayIconMenu->addAction("About");
+    connect(abountAct, &QAction::triggered, this, &TrayManager::showAbout);
+
     trayIconMenu->addSeparator();
 
     QAction *quitAct = trayIconMenu->addAction("Quit ModemBridge");
     connect(quitAct, &QAction::triggered, this, &TrayManager::quitApp);
 }
+
 
 
 void TrayManager::stopBridges() {
@@ -151,13 +157,49 @@ void TrayManager::stopBridges() {
     bridges.clear();
 }
 
+
 void TrayManager::showSettings() {
     SettingsDialog dialog;
     if (dialog.exec() == QDialog::Accepted) {
-        startBridges();
+
+        QList<BridgeConfig> updatedConfigs = AppSettings::instance().loadBridges();
+
+        // 1. Did the fleet size change? (Added or removed a port)
+        if (updatedConfigs.size() != bridges.size()) {
+            // We need a full restart to build new objects and tray sub-menus
+            m_logWindow->logStatus("SYSTEM", "Fleet size changed. Rebuilding all bridges...");
+            startBridges();
+        }
+        // 2. Surgical Hot-Swap: Push settings to existing running bridges
+        else {
+            for (const BridgeConfig& config : updatedConfigs) {
+                for (ModemBridge* bridge : bridges) {
+                    if (bridge->portName() == config.portName) {
+
+                        // Push live settings without dropping active BBS calls!
+                        bridge->setListenPort(config.listenPort);
+                        bridge->setLocalEcho(config.localEcho);
+                        bridge->setFlowControl(config.flowControl);
+                        bridge->setPhonebookPath(config.phonebookPath);
+
+                        // Handle Enable/Disable toggles
+                        if (config.isEnabled && bridge->currentState() == "OFFLINE") {
+                            bridge->start();
+                        } else if (!config.isEnabled && bridge->currentState() != "OFFLINE") {
+                            bridge->stop();
+                        }
+                        break; // Move to the next config
+                    }
+                }
+            }
+            m_logWindow->logStatus("SYSTEM", "Live settings applied to active bridges.");
+        }
+
+        // Always apply web UI port hot-swapping
         restartWebServers();
     }
 }
+
 
 void TrayManager::showLogs() {
     m_logWindow->show();
@@ -310,8 +352,10 @@ void TrayManager::restartWebServers() {
 }
 
 
-
-void TrayManager::quitApp() {
-    QApplication::quit();
+void TrayManager::showAbout() {
+    AboutDialog dialog;
+    dialog.exec();
 }
+
+void TrayManager::quitApp() {QApplication::quit();}
 

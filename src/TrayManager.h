@@ -32,6 +32,7 @@ private:
     void setupTrayIcon();
     void setupWebServer();
     void restartWebServers();
+    void showAbout();
 
     QSystemTrayIcon *trayIcon;
     QMenu *trayIconMenu;

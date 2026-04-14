@@ -5,6 +5,7 @@
 #include <QSerialPort>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QTcpServer>
 #include "bbsdata.h"
 #include "sshclient.h"
 
@@ -25,9 +26,11 @@ public:
     void hangup();
     void injectMacro(char macroType);
     void setTcpMode(bool enableSsh);
+    void setListenPort(int port);
 
     QString portName() const { return m_portName; }
     QString currentState() const { return m_currentState; }
+
 
 
 public slots:
@@ -55,6 +58,9 @@ private slots:
     void onSshDataReceived(const QByteArray &data);
     void onSshError(const QString &msg);
     void onSerialError(QSerialPort::SerialPortError error);
+    void onNewConnection();
+    void onRingTimeout();
+
 
 
 protected:
@@ -94,6 +100,14 @@ private:
     QString m_currentState = "OFFLINE";
     void changeState(const QString &newState);
     QString m_portName;
+
+    QTcpServer *m_tcpServer;
+    QTcpSocket *m_pendingSocket;
+    QTimer *m_ringTimer;
+    int m_listenPort = 0;
+    int m_autoAnswerRings = 0;
+    int m_ringCount = 0;
+
 };
 
 #endif // MODEMBRIDGE_H

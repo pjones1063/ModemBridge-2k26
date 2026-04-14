@@ -15,6 +15,8 @@ QList<BridgeConfig> AppSettings::loadBridges() {
         config.localEcho = m_settings.value("LocalEcho", false).toBool();
         config.phonebookPath = m_settings.value("PhonebookPath", "").toString();
         config.isEnabled = m_settings.value("IsEnabled", false).toBool();
+        config.listenPort = m_settings.value("ListenPort", 0).toInt(); // <--- FIXED
+        m_settings.setValue("ListenPort", config.listenPort);
 
         if (config.isValid()) bridges.append(config);
     }
@@ -34,6 +36,7 @@ void AppSettings::saveBridges(const QList<BridgeConfig>& bridges) {
         m_settings.setValue("LocalEcho", config.localEcho);
         m_settings.setValue("PhonebookPath", config.phonebookPath);
         m_settings.setValue("IsEnabled", config.isEnabled);
+        m_settings.setValue("ListenPort", config.listenPort);
     }
     m_settings.endArray();
 }

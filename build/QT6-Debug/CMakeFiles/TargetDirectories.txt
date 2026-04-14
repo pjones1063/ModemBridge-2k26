@@ -1,0 +1,5 @@
+/home/paul/eclipse-workspace/ModemBridgeTrayApp/build/QT6-Debug/CMakeFiles/ModemBridgeTray.dir
+/home/paul/eclipse-workspace/ModemBridgeTrayApp/build/QT6-Debug/CMakeFiles/edit_cache.dir
+/home/paul/eclipse-workspace/ModemBridgeTrayApp/build/QT6-Debug/CMakeFiles/rebuild_cache.dir
+/home/paul/eclipse-workspace/ModemBridgeTrayApp/build/QT6-Debug/CMakeFiles/ModemBridgeTray_autogen_timestamp_deps.dir
+/home/paul/eclipse-workspace/ModemBridgeTrayApp/build/QT6-Debug/CMakeFiles/ModemBridgeTray_autogen.dir
