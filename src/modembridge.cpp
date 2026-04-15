@@ -179,23 +179,23 @@ void ModemBridge::onSerialDataReceived() {
         for (char c : data) {
             if (c == 126 || c == 127) c = 8;
 
+            // --- TIES: Pass-Through Logic ---
             if (c == '+') {
                 m_escapeBuffer.append(c);
+
+                // Pass straight to BBS for instant echo!
+                if (m_isSshMode) m_ssh->write(QByteArray(1, c));
+                else             m_socket->write(QByteArray(1, c));
+
                 if (m_escapeBuffer.length() > 3) {
-                    if (m_isSshMode) m_ssh->write(m_escapeBuffer);
-                    else             m_socket->write(m_escapeBuffer);
-                    m_escapeBuffer.clear();
+                    m_escapeBuffer.clear(); // Too many pluses
                 } else if (m_escapeBuffer.length() == 3) {
                     if (m_escapeTimer) m_escapeTimer->start(1000);
                 }
                 continue;
             } else {
-                if (!m_escapeBuffer.isEmpty()) {
-                    if (m_isSshMode) m_ssh->write(m_escapeBuffer);
-                    else             m_socket->write(m_escapeBuffer);
-                    m_escapeBuffer.clear();
-                }
-                if (m_escapeTimer) m_escapeTimer->stop();
+                m_escapeBuffer.clear(); // Broken sequence
+                if (m_escapeTimer && m_escapeTimer->isActive()) m_escapeTimer->stop();
             }
 
             if (m_escPressed) {
@@ -638,17 +638,16 @@ void ModemBridge::sendToSerial(const QByteArray &data) {
 
 void ModemBridge::checkEscapeSequence() {
     if (m_escapeBuffer == "+++") {
-        m_escapeBuffer.clear();
         m_isConnected = false;
+        emit statusMessage(m_portName, "+++ Escape Sequence triggered. Dropping to Command Mode.");
         m_serial->write("\r\nOK\r\n");
-    } else {
-        if (!m_escapeBuffer.isEmpty()) {
-            if (m_isSshMode) m_ssh->write(m_escapeBuffer);
-            else             m_socket->write(m_escapeBuffer);
-        }
-        m_escapeBuffer.clear();
+        changeState("READY"); // Sync the Web UI state
     }
+    // No flushing needed, just clear the tracker
+    m_escapeBuffer.clear();
 }
+
+
 
 void ModemBridge::setPhonebookPath(const QString &path) {
     if (!path.isEmpty()) loadPhonebook(path);
